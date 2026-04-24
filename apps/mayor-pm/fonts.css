@@ -1,42 +1,28 @@
+/* Font stack. Family names are generic so the CSS isn't coupled to any one
+   foundry. Files are self-hosted in /fonts/. Replace with your own licensed
+   files if you fork this project. */
+
 @font-face {
-  font-family: "GT America Compressed";
-  src: url("/fonts/gt-america-compressed-black.otf") format("opentype");
+  font-family: "Display";
+  src: url("/fonts/display-900.otf") format("opentype");
   font-weight: 900;
   font-display: swap;
 }
 @font-face {
-  font-family: "GT America Compressed";
-  src: url("/fonts/gt-america-compressed-regular.otf") format("opentype");
+  font-family: "Sans";
+  src: url("/fonts/sans-400.otf") format("opentype");
   font-weight: 400;
   font-display: swap;
 }
 @font-face {
-  font-family: "Söhne";
-  src: url("/fonts/sohne-buch.otf") format("opentype");
-  font-weight: 400;
-  font-display: swap;
-}
-@font-face {
-  font-family: "Söhne";
-  src: url("/fonts/sohne-kraftig.otf") format("opentype");
+  font-family: "Sans";
+  src: url("/fonts/sans-600.otf") format("opentype");
   font-weight: 600;
   font-display: swap;
 }
 @font-face {
-  font-family: "Söhne Mono";
-  src: url("/fonts/sohne-mono-buch.otf") format("opentype");
+  font-family: "Mono";
+  src: url("/fonts/mono-400.otf") format("opentype");
   font-weight: 400;
-  font-display: swap;
-}
-@font-face {
-  font-family: "Boomer";
-  src: url("/fonts/boomer-black.otf") format("opentype");
-  font-weight: 900;
-  font-display: swap;
-}
-@font-face {
-  font-family: "GT Canon";
-  src: url("/fonts/gt-canon-black.otf") format("opentype");
-  font-weight: 900;
   font-display: swap;
 }
