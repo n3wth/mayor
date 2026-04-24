@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>mayor.wtf — pick a direction</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { font-family: ui-sans-serif, system-ui, -apple-system, sans-serif; background:#fafafa; color:#111; padding: 56px 48px; }
+  header { max-width: 720px; margin-bottom: 40px; }
+  h1 { font-size: 28px; font-weight: 800; letter-spacing: -0.02em; }
+  .intro { color:#555; font-size: 15px; margin-top: 8px; line-height: 1.5; }
+  .grid { display:grid; grid-template-columns: repeat(3, 1fr); gap: 24px; }
+  .card { border: 1px solid #e4e4e4; border-radius: 10px; overflow:hidden; background:#fff; display:flex; flex-direction: column; }
+  .card iframe { width: 100%; aspect-ratio: 4/5; border: 0; display:block; }
+  .card .label { padding: 14px 16px; font-size: 14px; border-top:1px solid #eee; }
+  .card .label a { color: #111; font-weight:600; text-decoration:none; }
+  .card .label a:hover { text-decoration: underline; }
+  @media (max-width: 860px) {
+    body { padding: 32px 20px; }
+    .grid { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>mayor.wtf — pick a direction</h1>
+  <p class="intro">Three blends of campaign-poster energy and editorial sensibility. Pick one.</p>
+</header>
+
+<div class="grid">
+  <div class="card">
+    <iframe src="http://localhost:8081/f1/" title="wtf f1"></iframe>
+    <div class="label"><a href="http://localhost:8081/f1/" target="_blank">f1 · Campaign Poster (yellow/black, refined)</a></div>
+  </div>
+  <div class="card">
+    <iframe src="http://localhost:8081/f2/" title="wtf f2"></iframe>
+    <div class="label"><a href="http://localhost:8081/f2/" target="_blank">f2 · Black Paper (warm black + cream editorial)</a></div>
+  </div>
+  <div class="card">
+    <iframe src="http://localhost:8081/f3/" title="wtf f3"></iframe>
+    <div class="label"><a href="http://localhost:8081/f3/" target="_blank">f3 · Ballot (vertical stack, hard color split)</a></div>
+  </div>
+</div>
+</body>
+</html>

@@ -1,0 +1,42 @@
+@font-face {
+  font-family: "GT America Compressed";
+  src: url("/fonts/gt-america-compressed-black.otf") format("opentype");
+  font-weight: 900;
+  font-display: swap;
+}
+@font-face {
+  font-family: "GT America Compressed";
+  src: url("/fonts/gt-america-compressed-regular.otf") format("opentype");
+  font-weight: 400;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Söhne";
+  src: url("/fonts/sohne-buch.otf") format("opentype");
+  font-weight: 400;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Söhne";
+  src: url("/fonts/sohne-kraftig.otf") format("opentype");
+  font-weight: 600;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Söhne Mono";
+  src: url("/fonts/sohne-mono-buch.otf") format("opentype");
+  font-weight: 400;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Boomer";
+  src: url("/fonts/boomer-black.otf") format("opentype");
+  font-weight: 900;
+  font-display: swap;
+}
+@font-face {
+  font-family: "GT Canon";
+  src: url("/fonts/gt-canon-black.otf") format("opentype");
+  font-weight: 900;
+  font-display: swap;
+}
