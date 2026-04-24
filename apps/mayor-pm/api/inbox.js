@@ -41,7 +41,22 @@ function rateLimit(key) {
 
 function isBotSender(from) {
   const local = from.split("@")[0];
-  return /^(mailer-daemon|postmaster|no-?reply|do[-.]?not[-.]?reply|bounce|auto|notify|notifications|newsletter|list-|marketing|support)/i.test(local);
+  const domain = (from.split("@")[1] || "").toLowerCase();
+
+  // Pattern-based block on the local part
+  if (/^(mailer-daemon|postmaster|no-?reply|do[-.]?not[-.]?reply|bounce|auto|notify|notifications|newsletter|list-|marketing|support|password(help|reset)?|account|accounts|billing|receipts?|invoice|alerts?|monitoring|updates|info|admin|team|help|contact|hello|hi|security|feedback|verify|verification|welcome|digest|daily|weekly)$/i.test(local)) {
+    return true;
+  }
+  if (/^(no-?reply|do[-.]?not[-.]?reply|password|account|billing|alert|notification|reply|bounce)/i.test(local)) {
+    return true;
+  }
+
+  // Domain-based block (common SaaS transactional senders)
+  if (/\.(amazonses|sendgrid|mailgun|postmarkapp|mandrillapp|resend)\.com$/i.test(domain)) return true;
+  // Specific transactional subdomains
+  if (/(^|\.)(em\d+|mg|mail|notification|notifications|transactional|noreply|no-reply|alerts?|bounces?)\./i.test(domain)) return true;
+
+  return false;
 }
 
 function sessionId(from) {
