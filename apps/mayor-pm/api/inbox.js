@@ -34,19 +34,37 @@ const allowlist = new Set(
   MAYOR_ALLOWLIST.split(",").map((s) => s.trim().toLowerCase()).filter(Boolean),
 );
 
-// Best-effort rate limit. Fluid Compute can reuse instances so this helps,
-// but it's not a guarantee. Upgrade to Upstash later if needed.
-const rateLimitWindowMs = 60_000;
-const rateLimitMax = 5;
-const hits = new Map();
+// Best-effort rate limits. Fluid Compute can reuse instances so this helps,
+// but it's not a guarantee across cold starts. Upgrade to Upstash for stricter.
+const perSenderWindowMs = 60_000;
+const perSenderMax = 5;
+const globalWindowMs = 60 * 60_000; // 1 hour
+const globalMax = 60;
+
+const perSenderHits = new Map();
+const globalHits = [];
 
 function rateLimit(key) {
   const now = Date.now();
-  const arr = (hits.get(key) || []).filter((t) => now - t < rateLimitWindowMs);
-  if (arr.length >= rateLimitMax) return false;
+
+  // Global
+  while (globalHits.length && now - globalHits[0] > globalWindowMs) globalHits.shift();
+  if (globalHits.length >= globalMax) return { ok: false, reason: "global" };
+
+  // Per-sender
+  const arr = (perSenderHits.get(key) || []).filter((t) => now - t < perSenderWindowMs);
+  if (arr.length >= perSenderMax) return { ok: false, reason: "sender" };
+
   arr.push(now);
-  hits.set(key, arr);
-  return true;
+  perSenderHits.set(key, arr);
+  globalHits.push(now);
+  return { ok: true };
+}
+
+// Block obvious automated / loop-causing senders.
+function isBotSender(from) {
+  const local = from.split("@")[0];
+  return /^(mailer-daemon|postmaster|no-?reply|do[-.]?not[-.]?reply|bounce|auto|notify|notifications|newsletter|list-|marketing|support)/i.test(local);
 }
 
 function sessionId(from) {
@@ -129,15 +147,22 @@ export default async function handler(req, res) {
 
   if (!from) return res.status(400).json({ error: "missing from" });
 
-  // Allow-list gate (silently accept so we don't bounce to spoofed senders).
+  // Allow-list gate: empty = allow everyone.
   if (allowlist.size > 0 && !allowlist.has(from)) {
     console.log(`[inbox] rejected (not allowlisted): ${from}`);
     return res.status(200).json({ ok: true, skipped: "not_allowlisted" });
   }
 
-  if (!rateLimit(from)) {
-    console.log(`[inbox] rate-limited: ${from}`);
-    return res.status(200).json({ ok: true, skipped: "rate_limited" });
+  // Block obvious automated senders to prevent email loops.
+  if (isBotSender(from)) {
+    console.log(`[inbox] dropped (bot sender): ${from}`);
+    return res.status(200).json({ ok: true, skipped: "bot_sender" });
+  }
+
+  const rl = rateLimit(from);
+  if (!rl.ok) {
+    console.log(`[inbox] rate-limited (${rl.reason}): ${from}`);
+    return res.status(200).json({ ok: true, skipped: `rate_limited_${rl.reason}` });
   }
 
   try {
