@@ -1,0 +1,9 @@
+name = "mayor-inbox-worker"
+main = "src/index.ts"
+compatibility_date = "2024-10-01"
+
+# MAYOR_WEBHOOK_URL and MAYOR_WEBHOOK_SECRET are set via:
+#   wrangler secret put MAYOR_WEBHOOK_SECRET
+# The URL is public, set below.
+[vars]
+MAYOR_WEBHOOK_URL = "https://mayor.wtf/api/inbox"
