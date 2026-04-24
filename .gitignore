@@ -5,6 +5,3 @@ node_modules
 .env
 .env.local
 
-# Commercial/trial fonts — not redistributable.
-# The live deployments on Vercel already have these; they are not checked in.
-apps/*/fonts/
