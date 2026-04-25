@@ -8,7 +8,7 @@
 // This server's only job is transport: Vercel → local disk → gastown.
 
 import { createServer } from "node:http";
-import { readFileSync, mkdirSync, writeFileSync } from "node:fs";
+import { readFileSync, readdirSync, statSync, mkdirSync, writeFileSync, existsSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -117,9 +117,77 @@ async function handleInbox(req, res) {
 
 const authed = (req) => (req.headers.authorization || "") === `Bearer ${TOKEN}`;
 
+// ── Live stats: scan gastown state cheaply ──────────────────────────────
+// Read-only filesystem snapshot of public-safe metrics. No PII.
+function computeStats() {
+  const stats = {
+    citizens: 0,
+    sessions_today: 0,
+    sessions_this_hour: 0,
+    last_email_age_seconds: null,
+    active_sessions: 0,
+    recent_pulse: 0, // 0..1 — how active in last 5 min
+    online: true,
+    server_time: new Date().toISOString(),
+  };
+  try {
+    const regPath = join(BASE, "citizens.json");
+    if (existsSync(regPath)) {
+      const reg = JSON.parse(readFileSync(regPath, "utf8"));
+      stats.citizens = (reg.next_id || 1) - 1;
+    }
+  } catch {}
+
+  try {
+    const logsDir = join(GT, ".runtime/email-sessions/logs");
+    if (existsSync(logsDir)) {
+      const now = Date.now();
+      const todayStr = new Date().toISOString().slice(0, 10).replace(/-/g, "");
+      const hourStr = todayStr + new Date().toISOString().slice(11, 13);
+      const files = readdirSync(logsDir);
+      let lastTs = 0;
+      let pulseCount = 0;
+      for (const f of files) {
+        if (f.startsWith(todayStr.slice(0, 4) + todayStr.slice(4, 6) + todayStr.slice(6, 8))) {
+          stats.sessions_today += 1;
+        }
+        if (f.startsWith(hourStr.slice(0, 8) + "T" + hourStr.slice(8, 10))) {
+          stats.sessions_this_hour += 1;
+        }
+        try {
+          const st = statSync(join(logsDir, f));
+          const mtime = st.mtimeMs;
+          if (mtime > lastTs) lastTs = mtime;
+          if (now - mtime < 5 * 60_000) pulseCount += 1;
+        } catch {}
+      }
+      if (lastTs) stats.last_email_age_seconds = Math.round((now - lastTs) / 1000);
+      // Pulse normalizes "sessions in last 5min" to 0..1, capping around 5
+      stats.recent_pulse = Math.min(1, pulseCount / 5);
+    }
+  } catch {}
+
+  // Active sessions: rough proxy = currently-held lockfiles
+  try {
+    const locksDir = join(GT, ".runtime/email-sessions/locks");
+    if (existsSync(locksDir)) {
+      stats.active_sessions = readdirSync(locksDir).filter((f) => f.endsWith(".lock")).length;
+    }
+  } catch {}
+
+  return stats;
+}
+
 const server = createServer(async (req, res) => {
   try {
     if (req.method === "GET" && req.url === "/health") return j(res, 200, { ok: true });
+    // Public stats — no auth needed; safe metrics only
+    if (req.method === "GET" && req.url === "/stats") {
+      // Permissive CORS so the front-end can fetch directly if desired
+      res.setHeader("Access-Control-Allow-Origin", "*");
+      res.setHeader("Cache-Control", "public, max-age=4");
+      return j(res, 200, computeStats());
+    }
     if (!authed(req)) return j(res, 401, { error: "unauthorized" });
     if (req.method === "POST" && req.url === "/inbox") return handleInbox(req, res);
     return j(res, 404, { error: "not found" });

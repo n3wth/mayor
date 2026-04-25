@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Oliver Newth — mayor.wtf</title>
-<meta name="description" content="mayor.wtf — Oliver Newth.">
+<title>mayor.wtf</title>
+<meta name="description" content="The Office of The Mayor — a live autonomous-agent inbox.">
 <meta name="theme-color" content="#000000">
 
 <link rel="icon" type="image/svg+xml" href="/favicon.svg">
@@ -29,6 +29,7 @@
 <style>
   :root {
     --y: #f2e437;
+    --y-dim: #6b6418;
     --k: #0a0a0a;
     --display: "Display", "Arial Narrow Bold", "Arial Narrow", sans-serif;
     --mono: "Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
@@ -42,23 +43,25 @@
     cursor: crosshair;
   }
 
-  /* Stage holds everything. Three z-layers: shapes (bg), MAYOR (mid), HUD (front). */
-  .stage {
-    position: fixed;
-    inset: 0;
-    overflow: hidden;
-  }
+  .stage { position: fixed; inset: 0; overflow: hidden; }
 
-  /* The shape canvas — yellow geometric primitives that pulse and drift. */
-  .shapes {
-    position: absolute;
-    inset: 0;
-    pointer-events: none;
-  }
+  /* Shape canvas — each shape is a labeled signal */
+  .shapes { position: absolute; inset: 0; pointer-events: none; }
   .shapes svg { display: block; width: 100%; height: 100%; overflow: visible; }
   .shape { will-change: transform, opacity; }
+  .shape-tip {
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    fill: var(--y-dim);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity .4s ease;
+  }
+  .shape:hover .shape-tip { opacity: 1; }
 
-  /* The MAYOR word, centered. */
+  /* MAYOR */
   .mayor-wrap {
     position: absolute;
     inset: 0;
@@ -79,37 +82,59 @@
     fill: var(--y);
   }
 
-  /* HUD — the only chrome. Top corner labels. */
+  /* HUD */
   .hud {
     position: absolute;
     inset: 0;
     pointer-events: none;
     z-index: 10;
   }
-  .hud .label {
+  .hud .panel {
     position: absolute;
     font-family: var(--mono);
     font-size: clamp(10px, 1.1vw, 12px);
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: var(--y);
+    opacity: 0.85;
+    line-height: 1.7;
+  }
+  .hud .panel .row { display: flex; justify-content: space-between; gap: 16px; min-width: 180px; }
+  .hud .panel .row .v { color: var(--y); font-variant-numeric: tabular-nums; }
+  .hud .panel .row .k { color: var(--y-dim); }
+
+  .hud .tl { top: clamp(20px, 4vw, 36px); left: clamp(20px, 4vw, 36px); }
+  .hud .tr { top: clamp(20px, 4vw, 36px); right: clamp(20px, 4vw, 36px); text-align: right; }
+  .hud .bl { bottom: clamp(20px, 4vw, 36px); left: clamp(20px, 4vw, 36px); }
+  .hud .br { bottom: clamp(20px, 4vw, 36px); right: clamp(20px, 4vw, 36px); text-align: right; pointer-events: auto; }
+
+  .hud a { color: var(--y); text-decoration: none; pointer-events: auto; opacity: 0.85; transition: opacity .25s ease; }
+  .hud a:hover { opacity: 1; text-decoration: underline; text-underline-offset: 4px; }
+
+  .hb { display: inline-block; width: 8px; height: 8px; background: var(--y); border-radius: 50%; margin-right: 8px; vertical-align: middle; }
+  .hb.offline { background: #c14b3a; }
+
+  /* The "send mail" CTA. Real hover affordance. */
+  .cta {
+    position: absolute;
+    left: 50%;
+    bottom: clamp(60px, 9vh, 110px);
+    transform: translateX(-50%);
+    pointer-events: auto;
+    font-family: var(--mono);
+    font-size: clamp(11px, 1.2vw, 13px);
     letter-spacing: 3px;
     text-transform: uppercase;
     color: var(--y);
-    opacity: 0.7;
+    text-decoration: none;
+    border: 1.5px solid var(--y);
+    padding: clamp(10px, 1.4vw, 14px) clamp(20px, 2.4vw, 28px);
+    transition: background .2s ease, color .2s ease;
+    z-index: 11;
   }
-  .hud .tl { top: clamp(20px, 4vw, 40px); left: clamp(20px, 4vw, 40px); }
-  .hud .tr { top: clamp(20px, 4vw, 40px); right: clamp(20px, 4vw, 40px); }
-  .hud .bl { bottom: clamp(20px, 4vw, 40px); left: clamp(20px, 4vw, 40px); }
-  .hud .br { bottom: clamp(20px, 4vw, 40px); right: clamp(20px, 4vw, 40px); pointer-events: auto; }
-  .hud a { color: var(--y); text-decoration: none; pointer-events: auto; opacity: 0.7; transition: opacity .2s; }
-  .hud a:hover { opacity: 1; }
-
-  .hud .hb {
-    display: inline-block;
-    width: 8px; height: 8px;
-    background: var(--y);
-    border-radius: 50%;
-    margin-right: 8px;
-    vertical-align: middle;
-  }
+  .cta:hover { background: var(--y); color: var(--k); }
+  .cta .arrow { display: inline-block; margin-left: 10px; transition: transform .2s ease; }
+  .cta:hover .arrow { transform: translateX(4px); }
 
   @media (prefers-reduced-motion: reduce) {
     * { animation: none !important; transition: none !important; }
@@ -120,25 +145,80 @@
 
 <div class="stage">
 
-  <!-- Shape layer -->
+  <!-- Shape signals.
+       data-signal: which live metric drives this shape's pulse.
+       data-tip: tiny label shown on hover. -->
   <div class="shapes" aria-hidden="true">
     <svg viewBox="0 0 1600 1000" preserveAspectRatio="xMidYMid slice">
-      <!-- Yellow shapes that animate. Sized in viewBox units. -->
-      <g class="shape s1"><circle cx="220" cy="180" r="60" fill="var(--y)"/></g>
-      <g class="shape s2"><circle cx="1380" cy="220" r="90" fill="var(--y)"/></g>
-      <g class="shape s3"><rect x="80" y="780" width="180" height="14" fill="var(--y)"/></g>
-      <g class="shape s4"><rect x="1300" y="820" width="220" height="14" fill="var(--y)"/></g>
-      <g class="shape s5"><polygon points="800,80 830,140 770,140" fill="var(--y)"/></g>
-      <g class="shape s6"><circle cx="120" cy="500" r="14" fill="var(--y)"/></g>
-      <g class="shape s7"><circle cx="1480" cy="540" r="14" fill="var(--y)"/></g>
-      <g class="shape s8"><rect x="780" y="900" width="40" height="40" fill="var(--y)"/></g>
-      <g class="shape s9"><circle cx="400" cy="900" r="6" fill="var(--y)"/></g>
-      <g class="shape s10"><circle cx="1200" cy="900" r="6" fill="var(--y)"/></g>
-      <g class="shape s11"><rect x="1430" y="430" width="100" height="2" fill="var(--y)"/></g>
-      <g class="shape s12"><rect x="70" y="430" width="100" height="2" fill="var(--y)"/></g>
-      <g class="shape s13"><circle cx="800" cy="940" r="3" fill="var(--y)"/></g>
-      <g class="shape s14"><polygon points="200,920 230,920 215,940" fill="var(--y)"/></g>
-      <g class="shape s15"><polygon points="1380,920 1410,920 1395,940" fill="var(--y)"/></g>
+      <!-- Top band: citizens & infrastructure -->
+      <g class="shape" data-signal="citizen" data-shape-id="c0">
+        <circle cx="220" cy="180" r="60" fill="var(--y)"/>
+        <text class="shape-tip" x="220" y="270" text-anchor="middle">citizen 1</text>
+      </g>
+      <g class="shape" data-signal="citizen" data-shape-id="c1">
+        <circle cx="1380" cy="220" r="50" fill="var(--y)"/>
+        <text class="shape-tip" x="1380" y="295" text-anchor="middle">citizen 2</text>
+      </g>
+      <g class="shape" data-signal="citizen" data-shape-id="c2">
+        <circle cx="800" cy="160" r="40" fill="var(--y)"/>
+        <text class="shape-tip" x="800" y="225" text-anchor="middle">citizen 3</text>
+      </g>
+      <g class="shape" data-signal="citizen-slot" data-shape-id="c3">
+        <circle cx="500" cy="120" r="14" fill="var(--y)" opacity="0.25"/>
+      </g>
+      <g class="shape" data-signal="citizen-slot" data-shape-id="c4">
+        <circle cx="1100" cy="120" r="14" fill="var(--y)" opacity="0.25"/>
+      </g>
+
+      <!-- Side rails: sessions today (length scales with count) -->
+      <g class="shape" data-signal="session-today" data-shape-id="st">
+        <rect x="80" y="780" width="180" height="14" fill="var(--y)"/>
+        <text class="shape-tip" x="170" y="810" text-anchor="middle">sessions today</text>
+      </g>
+      <g class="shape" data-signal="session-hour" data-shape-id="sh">
+        <rect x="1340" y="820" width="180" height="14" fill="var(--y)"/>
+        <text class="shape-tip" x="1430" y="850" text-anchor="middle">sessions / hr</text>
+      </g>
+
+      <!-- Active triangle: rotates while a session is active -->
+      <g class="shape" data-signal="active" data-shape-id="t">
+        <polygon points="800,80 836,144 764,144" fill="var(--y)"/>
+        <text class="shape-tip" x="800" y="170" text-anchor="middle">thinking</text>
+      </g>
+
+      <!-- Recent activity: small dots fade in/out with pulse -->
+      <g class="shape" data-signal="pulse" data-shape-id="p1">
+        <circle cx="120" cy="500" r="14" fill="var(--y)"/>
+      </g>
+      <g class="shape" data-signal="pulse" data-shape-id="p2">
+        <circle cx="1480" cy="540" r="14" fill="var(--y)"/>
+      </g>
+      <g class="shape" data-signal="pulse" data-shape-id="p3">
+        <circle cx="1430" cy="430" r="6" fill="var(--y)"/>
+      </g>
+      <g class="shape" data-signal="pulse" data-shape-id="p4">
+        <circle cx="170" cy="430" r="6" fill="var(--y)"/>
+      </g>
+
+      <!-- Last-email indicator -->
+      <g class="shape" data-signal="last-email" data-shape-id="le">
+        <rect x="780" y="900" width="40" height="40" fill="var(--y)"/>
+        <text class="shape-tip" x="800" y="970" text-anchor="middle">last received</text>
+      </g>
+
+      <!-- Decorative anchors (also drift) -->
+      <g class="shape" data-signal="decor" data-shape-id="d1">
+        <rect x="1430" y="430" width="100" height="2" fill="var(--y)"/>
+      </g>
+      <g class="shape" data-signal="decor" data-shape-id="d2">
+        <rect x="70" y="430" width="100" height="2" fill="var(--y)"/>
+      </g>
+      <g class="shape" data-signal="decor" data-shape-id="d3">
+        <polygon points="200,920 230,920 215,940" fill="var(--y)"/>
+      </g>
+      <g class="shape" data-signal="decor" data-shape-id="d4">
+        <polygon points="1380,920 1410,920 1395,940" fill="var(--y)"/>
+      </g>
     </svg>
   </div>
 
@@ -157,13 +237,28 @@
     </svg>
   </h1>
 
+  <!-- CTA -->
+  <a class="cta" href="mailto:um@mayor.wtf?subject=Mayor%2C%20I%20have%20a%20question">
+    Email&nbsp;<span data-text="addr">um@mayor.wtf</span><span class="arrow">→</span>
+  </a>
+
   <!-- HUD -->
   <div class="hud">
-    <div class="label tl">mayor.wtf</div>
-    <div class="label tr"><span class="hb" aria-hidden="true"></span>online</div>
-    <div class="label bl">Oliver Newth · Google · SF</div>
-    <div class="label br">
-      <a href="https://n3wth.com">n3wth.com ↗</a>
+    <div class="panel tl">
+      <div class="row"><span class="k">domain</span><span class="v">mayor.wtf</span></div>
+      <div class="row"><span class="k">status</span><span class="v"><span class="hb" data-hb></span><span data-status>online</span></span></div>
+    </div>
+    <div class="panel tr">
+      <div class="row"><span class="k">citizens</span><span class="v" data-stat="citizens">·</span></div>
+      <div class="row"><span class="k">sessions today</span><span class="v" data-stat="sessions_today">·</span></div>
+      <div class="row"><span class="k">last received</span><span class="v" data-stat="last_email_age">—</span></div>
+    </div>
+    <div class="panel bl">
+      <div class="row"><span class="k">held by</span><span class="v">Oliver Newth</span></div>
+      <div class="row"><span class="k">at</span><span class="v">Google · SF</span></div>
+    </div>
+    <div class="panel br">
+      <div class="row"><span class="v"><a href="https://n3wth.com">n3wth.com ↗</a></span></div>
     </div>
   </div>
 
