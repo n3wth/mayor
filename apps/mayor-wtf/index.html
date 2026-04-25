@@ -273,6 +273,47 @@
     .seq { width: 94vw; padding: 6px 8px; }
   }
 
+  /* TUNNEL — full-screen 3D world overlay. Hidden by default. When active,
+     it covers the page; the room behind dims to ~5%. Built on three.js. */
+  .tunnel {
+    position: fixed;
+    inset: 0;
+    z-index: 30;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 1.5s cubic-bezier(.2,.8,.2,1);
+    background: #000;
+  }
+  .tunnel.active { opacity: 1; pointer-events: auto; }
+  .tunnel canvas { display: block; width: 100%; height: 100%; }
+  .tunnel .scene-tag {
+    position: absolute;
+    top: clamp(20px, 4vw, 36px);
+    left: 50%;
+    transform: translateX(-50%);
+    color: rgba(255, 220, 80, 0.85);
+    font-family: var(--mono);
+    font-size: clamp(10px, 1vw, 12px);
+    letter-spacing: 0.32em;
+    text-transform: uppercase;
+    text-shadow: 0 0 16px rgba(255, 200, 60, 0.6);
+    pointer-events: none;
+  }
+  .tunnel .esc-hint {
+    position: absolute;
+    bottom: clamp(20px, 4vw, 36px);
+    left: 50%;
+    transform: translateX(-50%);
+    color: rgba(255, 255, 255, 0.5);
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0.24em;
+    text-transform: uppercase;
+    pointer-events: none;
+  }
+  /* Dim the rest of the page when tunnel is active */
+  body.tunneling .stage { opacity: 0.05; transition: opacity 1s ease; }
+
   /* Sound chip — one tiny invitation, bottom-right. */
   .sound {
     position: absolute;
@@ -372,8 +413,24 @@
 
 </div>
 
+<!-- 3D tunnel overlay. Sits outside .stage so the dim doesn't cascade. -->
+<div class="tunnel" data-tunnel aria-hidden="true">
+  <canvas data-tunnel-canvas></canvas>
+  <div class="scene-tag" data-tunnel-tag></div>
+  <div class="esc-hint">esc to return</div>
+</div>
+
 <script src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/gsap.min.js" defer></script>
 <script src="https://cdn.jsdelivr.net/npm/tone@15.0.4/build/Tone.js" defer></script>
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.165.0/build/three.module.min.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.165.0/examples/jsm/",
+    "postprocessing": "https://cdn.jsdelivr.net/npm/postprocessing@6.36.4/build/postprocessing.esm.js"
+  }
+}
+</script>
 <script type="module">
   import { initMotion } from "/motion.js";
   const ready = () => (window.gsap ? initMotion(window.gsap) : requestAnimationFrame(ready));

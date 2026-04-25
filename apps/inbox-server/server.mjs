@@ -418,7 +418,7 @@ async function handleEventPublish(req, res) {
   let body;
   try { body = JSON.parse(raw); } catch { return j(res, 400, { error: "bad json" }); }
   // Whitelist allowed event types and clamp coords.
-  const allowed = new Set(["click", "hover", "wave", "tab", "color", "mode", "word", "vibe", "tempo", "confetti", "lamp", "step", "clear", "ptr", "kick", "chord", "paint", "dim", "rewind", "forward", "snapshot", "mirror"]);
+  const allowed = new Set(["click", "hover", "wave", "tab", "color", "mode", "word", "vibe", "tempo", "confetti", "lamp", "step", "clear", "ptr", "kick", "chord", "paint", "dim", "rewind", "forward", "snapshot", "mirror", "tunnel"]);
   const type = allowed.has(body.type) ? body.type : null;
   if (!type) return j(res, 400, { error: "bad type" });
   // ptr (cursor presence) gets its own looser bucket; everything else uses

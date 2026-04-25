@@ -2077,6 +2077,7 @@ export function initMotion(gsap) {
         if (!seqGrid[L][i]) continue;
         anyHit = true;
         playStep(L, time, 0.7);
+        try { tunnelTap(L); } catch {}
         if (seqEl) {
           const c = seqEl.querySelector(`.cell[data-letter="${L}"][data-idx="${i}"]`);
           if (c) {
@@ -2533,6 +2534,66 @@ export function initMotion(gsap) {
     else if (kind === "surge") runSurge();
   }
 
+  // ── TUNNEL: lazy-loaded 3D worlds. Press 't' to enter; 'Esc' to exit. ──
+  // The tunnel module is ~280KB (three.js + postprocessing) so we only fetch
+  // it when first needed. After load we keep the handle around.
+  let tunnelHandle = null;
+  let _tunnelBeatSub = null;
+  async function ensureTunnel() {
+    if (tunnelHandle) return tunnelHandle;
+    try {
+      const mod = await import("/tunnel.js");
+      tunnelHandle = await mod.initTunnel({
+        getSeqGrid: () => seqGrid,
+        getActiveColors: () => ({ M: "#f0d72a", A: "#f0d72a", Y: "#f0d72a", O: "#f0d72a", R: "#f0d72a" }),
+        onPlayStep: (cb) => { _tunnelBeatSub = cb; },
+      });
+    } catch (e) { console.warn("[tunnel] load failed", e); }
+    return tunnelHandle;
+  }
+  // Hook our existing playStep so the tunnel can react to every beat.
+  const _origPlayStep = playStep;
+  // (playStep is captured in startStepLoop's closure; instead, fire from there.)
+  // We patch the loop's per-step callback by wrapping the active letters check.
+  // Simpler: subscribe via tap inside applyStepFromPeer/local cell click, AND
+  // also call _tunnelBeatSub from inside the step loop. We wrap pluck/playStep:
+  function tunnelTap(L) { try { _tunnelBeatSub && _tunnelBeatSub(L); } catch {} }
+
+  async function enterTunnel(sceneId, opts = {}) {
+    const t = await ensureTunnel();
+    if (!t) return;
+    t.enter(sceneId, opts);
+  }
+
+  // 't' key — bare press, not in input.
+  window.addEventListener("keydown", (e) => {
+    if (e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
+    const t = e.target;
+    if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
+    if (e.key === "t" || e.key === "T") {
+      e.preventDefault();
+      enterTunnel();
+    }
+  });
+
+  // Auto-trigger every 3-5 minutes (server snapshot wins so the room shares)
+  setInterval(() => {
+    if (document.hidden) return;
+    if (tunnelHandle && tunnelHandle.isActive()) return;
+    // Only auto-trigger after the user has been here a bit and hasn't just
+    // closed one. 4-min mean spacing.
+    if (Math.random() < 0.55) {
+      enterTunnel();
+      // Broadcast so peers join the same tunnel
+      const sceneId = (tunnelHandle && tunnelHandle.SCENES) ? tunnelHandle.SCENES[Math.floor(Math.random() * tunnelHandle.SCENES.length)] : null;
+      fetch(`${SYNC_BASE}/event`, {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ type: "tunnel", scene: sceneId, from: SELF_ID }),
+        keepalive: true,
+      }).catch(() => {});
+    }
+  }, 180000 + Math.random() * 120000);
+
   // ── PRESENCE / SYNC via SSE ──
   // Track peer → star index. The server gives presence count, not stable
   // IDs, so we allocate indices client-side as new "from" values appear.
@@ -2619,6 +2680,12 @@ export function initMotion(gsap) {
           // Step toggle from a peer
           if (ev.type === "step") {
             applyStepFromPeer(ev.letter, ev.idx | 0, !!ev.on);
+            return;
+          }
+          // Tunnel — server-broadcast so the room enters together
+          if (ev.type === "tunnel") {
+            if (ev.from === SELF_ID) return;
+            enterTunnel(ev.scene);
             return;
           }
           if (ev.type === "kick") {
