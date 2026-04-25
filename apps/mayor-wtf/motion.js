@@ -1227,6 +1227,7 @@ export function initMotion(gsap) {
           c.classList.toggle("on", next);
           // Optimistic local: trigger sound preview if turning on
           if (next && soundOn) playStep(L, Tone ? Tone.now() : 0, 0.6);
+          updateMood();
           // Broadcast
           fetch(`${SYNC_BASE}/event`, {
             method: "POST",
@@ -1240,6 +1241,91 @@ export function initMotion(gsap) {
     }
   }
 
+  // ── MOOD PROPHET ──────────────────────────────────────────────────────
+  // Reads the room's groove from seqGrid and gives it a name. The label
+  // floats just above the sequencer and fades when the pattern shifts.
+  let moodEl = null;
+  let lastMood = "";
+  if (seqEl && seqEl.parentNode) {
+    moodEl = document.createElement("div");
+    moodEl.className = "mood";
+    moodEl.setAttribute("aria-live", "polite");
+    moodEl.style.cssText = [
+      "position:absolute",
+      "left:50%",
+      "transform:translateX(-50%)",
+      // sit just above the sequencer; .seq bottom ranges ~96-150px, so add ~38px
+      "bottom:calc(clamp(96px, 14vh, 150px) + 38px)",
+      "z-index:14",
+      "pointer-events:none",
+      "font-family:var(--mono)",
+      "font-size:10.5px",
+      "font-style:italic",
+      "letter-spacing:0.16em",
+      "text-transform:uppercase",
+      "color:rgba(240,215,42,0.62)",
+      "white-space:nowrap",
+      "opacity:0",
+      "transition:opacity 600ms ease",
+    ].join(";");
+    seqEl.parentNode.appendChild(moodEl);
+  }
+
+  function computeMood() {
+    let total = 0;
+    let lead = 0; // R + Y (lead voices: open hat & lead synth)
+    let bass = 0; // M + A + O (bass body)
+    let kickOff = 0; // M cells off the downbeat (1,2,3 of each beat group)
+    for (const L of SEQ_LETTERS) {
+      for (let i = 0; i < SEQ_STEPS; i++) {
+        if (!seqGrid[L][i]) continue;
+        total++;
+        if (L === "R" || L === "Y") lead++;
+        if (L === "M" || L === "A" || L === "O") bass++;
+        if (L === "M" && i % 4 !== 0) kickOff++;
+      }
+    }
+    const density = total / 80;
+    const leadRatio = lead / (bass + 1);
+    // syncopation factored into "wistful" / "alive" feel via kick-off-beat
+    if (density === 0) return "patient as the dawn";
+    if (density < 0.1) return "patient as the dawn";
+    if (density < 0.25 && leadRatio > 1) return "wistful";
+    if (density < 0.25) return "minimal";
+    if (density < 0.5 && leadRatio > 1) return "shimmering";
+    if (density < 0.5 && kickOff >= 2) return "syncopated";
+    if (density < 0.5) return "patient";
+    if (density > 0.7 && leadRatio < 0.3) return "thunderous";
+    if (density > 0.7) return "ecstatic";
+    if (density > 0.4) return "alive";
+    return "becoming";
+  }
+
+  function updateMood() {
+    if (!moodEl) return;
+    const mood = computeMood();
+    if (mood === lastMood) {
+      moodEl.style.opacity = "1";
+      return;
+    }
+    lastMood = mood;
+    // Fade out, swap text, fade back in.
+    moodEl.style.opacity = "0";
+    setTimeout(() => {
+      if (!moodEl) return;
+      moodEl.textContent = mood;
+      moodEl.style.opacity = "1";
+    }, 240);
+  }
+
+  // Initial label
+  if (moodEl) {
+    moodEl.textContent = computeMood();
+    lastMood = moodEl.textContent;
+    // Defer so transition runs.
+    requestAnimationFrame(() => { if (moodEl) moodEl.style.opacity = "1"; });
+  }
+
   function applyGrid(g) {
     if (!seqEl || !g) return;
     for (const L of SEQ_LETTERS) {
@@ -1250,12 +1336,14 @@ export function initMotion(gsap) {
         if (c) c.classList.toggle("on", !!row[i]);
       }
     }
+    updateMood();
   }
   function applyStepFromPeer(L, idx, on) {
     if (!SEQ_LETTERS.includes(L) || idx < 0 || idx >= SEQ_STEPS) return;
     seqGrid[L][idx] = !!on;
     const c = seqEl?.querySelector(`.cell[data-letter="${L}"][data-idx="${idx}"]`);
     if (c) c.classList.toggle("on", !!on);
+    updateMood();
   }
 
   // Voices per letter — instantiated once when audio is enabled.
