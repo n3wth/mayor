@@ -304,7 +304,7 @@ async function handleEventPublish(req, res) {
   let body;
   try { body = JSON.parse(raw); } catch { return j(res, 400, { error: "bad json" }); }
   // Whitelist allowed event types and clamp coords.
-  const allowed = new Set(["click", "hover", "wave", "tab", "color", "mode", "word", "vibe", "tempo", "confetti", "lamp", "step", "clear"]);
+  const allowed = new Set(["click", "hover", "wave", "tab", "color", "mode", "word", "vibe", "tempo", "confetti", "lamp", "step", "clear", "kick"]);
   const type = allowed.has(body.type) ? body.type : null;
   if (!type) return j(res, 400, { error: "bad type" });
   // 'from' is a stable per-tab nonce so peers can ignore their own echoes.
@@ -376,6 +376,16 @@ async function handleEventPublish(req, res) {
     const on = !!body.on;
     grid[L][idx] = on;
     broadcast({ type: "step", letter: L, idx, on, from, ts: Date.now() });
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    return j(res, 202, { ok: true });
+  }
+
+  if (type === "kick") {
+    // Live performance keypress — letter glyph hit (M/A/Y/O/R) or
+    // a lead one-shot (note). Transient, no persistence.
+    const letter = typeof body.letter === "string" ? body.letter.toUpperCase().slice(0, 1) : "";
+    const note = typeof body.note === "string" ? body.note.slice(0, 6) : "";
+    broadcast({ type: "kick", letter, note, from, ts: Date.now() });
     res.setHeader("Access-Control-Allow-Origin", "*");
     return j(res, 202, { ok: true });
   }
