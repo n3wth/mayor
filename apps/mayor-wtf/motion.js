@@ -2335,7 +2335,6 @@ export function initMotion(gsap) {
   const grooveInterval = setInterval(checkGrooveEvolver, 1200);
 
   // ── DIMENSION PORTAL APPLY ─────────────────────────────────────────────
-  let currentDim = 1;
   function applyDimension(n) {
     const idx = Math.max(1, Math.min(9, n | 0));
     const dim = DIMENSIONS[idx - 1];
