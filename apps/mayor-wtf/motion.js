@@ -470,6 +470,68 @@ function initRipples(canvas) {
   };
 }
 
+// ── CURSOR TRAIL ─────────────────────────────────────────────────────────
+// Soft yellow particles spawn on pointermove, drift slowly outward, fade in
+// ~1.5s. A quiet mark — the cursor leaves a breath behind it.
+function initTrail(canvas) {
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return null;
+  let dpr = Math.min(2, window.devicePixelRatio || 1);
+  let W = 0, H = 0;
+  function resize() {
+    canvas.width = (canvas.clientWidth * dpr) | 0;
+    canvas.height = (canvas.clientHeight * dpr) | 0;
+    W = canvas.width; H = canvas.height;
+  }
+  resize();
+  window.addEventListener("resize", resize);
+
+  const MAX = 150;
+  const particles = [];
+  let raf = 0;
+  let paused = false;
+  document.addEventListener("visibilitychange", () => { paused = document.hidden; });
+
+  function tick() {
+    if (!paused) {
+      ctx.clearRect(0, 0, W, H);
+      for (let i = particles.length - 1; i >= 0; i--) {
+        const p = particles[i];
+        p.age++;
+        if (p.age >= p.life) { particles.splice(i, 1); continue; }
+        p.x += p.vx;
+        p.y += p.vy;
+        const t = p.age / p.life;
+        const alpha = (1 - t) * 0.55;
+        const r = (1.6 + t * 1.4) * dpr;
+        ctx.fillStyle = `rgba(255, 220, 80, ${alpha})`;
+        ctx.beginPath();
+        ctx.arc(p.x * dpr, p.y * dpr, r, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+    raf = requestAnimationFrame(tick);
+  }
+  raf = requestAnimationFrame(tick);
+
+  return {
+    addPoint: (x, y) => {
+      const n = 1 + ((Math.random() * 3) | 0); // 1–3 particles per call
+      for (let i = 0; i < n; i++) {
+        if (particles.length >= MAX) particles.shift();
+        particles.push({
+          x, y,
+          vx: (Math.random() - 0.5) * 0.6,
+          vy: (Math.random() - 0.5) * 0.6,
+          age: 0,
+          life: 70 + ((Math.random() * 30) | 0), // 70–100 frames (~1.2–1.7s)
+        });
+      }
+    },
+    destroy: () => { cancelAnimationFrame(raf); window.removeEventListener("resize", resize); },
+  };
+}
+
 // ── AUDIO: continuous drone + pentatonic note plucks ────────────────────
 // Tone.js. The page sounds like a cathedral. Always-on once enabled —
 // browser autoplay policy means the user has to click sound-on once.
@@ -545,6 +607,7 @@ export function initMotion(gsap) {
   const fieldCanvas = document.querySelector("[data-field]");
   const starsCanvas = document.querySelector("[data-stars]");
   const auroraCanvas = document.querySelector("[data-aurora]");
+  const trailCanvas = document.querySelector("[data-trail]");
   const ripplesCanvas = document.querySelector("[data-ripples]");
   const halo = document.querySelector("[data-cursor-halo]");
   const dot = document.querySelector("[data-cursor-dot]");
@@ -564,11 +627,12 @@ export function initMotion(gsap) {
   // is declared further down; the getter reads it lazily each spawn.
   let soundOn = false;
 
-  let fieldHandle = null, starsHandle = null, auroraHandle = null, ripplesHandle = null;
+  let fieldHandle = null, starsHandle = null, auroraHandle = null, ripplesHandle = null, trailHandle = null;
   if (!reduced) {
     fieldHandle = initField(fieldCanvas);
     starsHandle = initStars(starsCanvas, () => soundOn);
     auroraHandle = initAurora(auroraCanvas);
+    trailHandle = initTrail(trailCanvas);
     ripplesHandle = initRipples(ripplesCanvas);
   }
 
@@ -633,10 +697,15 @@ export function initMotion(gsap) {
     const midY = gsap.quickTo(layers.mid, "y", { duration: 1.4, ease: "power3.out" });
 
     let last = 0;
+    let lastTrail = 0;
     window.addEventListener("pointermove", (e) => {
       haloX(e.clientX); haloY(e.clientY);
       dotX(e.clientX); dotY(e.clientY);
       const now = performance.now();
+      if (trailHandle && now - lastTrail >= 30) {
+        lastTrail = now;
+        trailHandle.addPoint(e.clientX, e.clientY);
+      }
       if (now - last < 16) return;
       last = now;
       if (fieldHandle) fieldHandle.setMouse(e.clientX / window.innerWidth, 1 - e.clientY / window.innerHeight);
@@ -921,6 +990,7 @@ export function initMotion(gsap) {
     if (fieldHandle) fieldHandle.destroy();
     if (starsHandle) starsHandle.destroy();
     if (auroraHandle) auroraHandle.destroy();
+    if (trailHandle) trailHandle.destroy();
     if (ripplesHandle) ripplesHandle.destroy();
     if (es) { try { es.close(); } catch {} }
     gsap.killTweensOf("*");
@@ -934,6 +1004,7 @@ export function initMotion(gsap) {
       if (fieldHandle) fieldHandle.destroy();
       if (starsHandle) starsHandle.destroy();
       if (auroraHandle) auroraHandle.destroy();
+      if (trailHandle) trailHandle.destroy();
       if (ripplesHandle) ripplesHandle.destroy();
       if (es) { try { es.close(); } catch {} }
       window.removeEventListener("pagehide", onPageHide);
