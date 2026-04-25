@@ -136,9 +136,8 @@ export function initMotion(gsap) {
   }
 
   function makeSessionBlob(seed) {
-    // Small organic blob: a circle with slight radius wobble.
     const rand = mulberry32(seed * 17 + 3);
-    const r = 5 + rand() * 7;
+    const r = 9 + rand() * 14;
     const c = document.createElementNS(SVG_NS, "circle");
     c.setAttribute("r", "0");
     c.setAttribute("fill", "black");
@@ -215,7 +214,7 @@ export function initMotion(gsap) {
     c.setAttribute("r", "0");
     c.setAttribute("fill", "black");
     objectsG.appendChild(c);
-    const targetR = 28;
+    const targetR = 42;
     if (reduced) {
       c.setAttribute("r", targetR);
     } else {
@@ -224,7 +223,7 @@ export function initMotion(gsap) {
         { attr: { r: targetR }, duration: 1.6, ease: E.bounce, overwrite: "auto" }
       );
       gsap.to(c, {
-        attr: { r: targetR * 1.08 },
+        attr: { r: targetR * 1.12 },
         duration: 4,
         ease: E.inOut,
         yoyo: true,
