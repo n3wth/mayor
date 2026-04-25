@@ -58,6 +58,12 @@
       radial-gradient(70% 50% at 50% 50%, rgba(0,0,0,0) 30%, rgba(0,0,0,0.45) 100%);
   }
 
+  /* Aurora curtains — slow vertical yellow gauze ribbons drifting downward.
+     Sits between .wash (z:1) and .stars (z:2). DOM order after .wash so it
+     paints over the vignette but below the stars. */
+  .aurora { position: absolute; inset: 0; z-index: 1; pointer-events: none; }
+  .aurora canvas { display: block; width: 100%; height: 100%; mix-blend-mode: screen; }
+
   /* Presence stars — soft drifting points of light, one per visitor. */
   .stars { position: absolute; inset: 0; z-index: 2; pointer-events: none; }
   .stars canvas { display: block; width: 100%; height: 100%; }
@@ -236,6 +242,9 @@
   <!-- Atmosphere -->
   <div class="field" aria-hidden="true"><canvas data-field></canvas></div>
   <div class="wash" aria-hidden="true"></div>
+
+  <!-- Aurora curtains -->
+  <div class="aurora" aria-hidden="true"><canvas data-aurora></canvas></div>
 
   <!-- Presence stars -->
   <div class="stars" aria-hidden="true"><canvas data-stars></canvas></div>
