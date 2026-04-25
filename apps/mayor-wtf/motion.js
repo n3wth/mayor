@@ -2596,10 +2596,14 @@ export function initMotion(gsap) {
             applyDimension(ev.dim | 0);
             return;
           }
-          // Emergence — collective moment. Fires for ALL visitors (including
-          // self) at the same wall-clock instant, so the room moves together.
           if (ev.type === "emergence") {
             handleEmergence(typeof ev.emergence === "string" ? ev.emergence : "");
+            return;
+          }
+          if (ev.type === "mirror") {
+            if (typeof window.__mayorApplyMirror === "function") {
+              window.__mayorApplyMirror(!!ev.on);
+            }
             return;
           }
           if (ev.from === SELF_ID) return;
@@ -3339,9 +3343,91 @@ export function initMotion(gsap) {
       }
     }
   }
+  // ── MIRROR PORTAL ─────────────────────────────────────────────────────
+  // Press 'i' (for inversion) to flip the page horizontally + invert colors.
+  // Server-synced — when one visitor mirrors, the whole room mirrors. The
+  // physical keyboard is unmirrored (browser key events are unaffected by
+  // CSS transforms), so 'i' still toggles back. Audio panning also flips
+  // for any peer-cursor sound so left/right peers swap sides.
+  let mirrored = false;
+  let mirrorTagEl = null;
+  let mirrorTagTimer = null;
+  // Inject the mirror rule once. We do it here (not in index.html) so the
+  // feature lives entirely inside motion.js as required. transform-origin
+  // center keeps the flip about the page midline. The filter inverts colors
+  // and rotates hue 180° so yellow becomes its complement.
+  (function injectMirrorCSS() {
+    const css = "html.mirror { filter: invert(1) hue-rotate(180deg); transform: scaleX(-1); transform-origin: center; }";
+    const style = document.createElement("style");
+    style.setAttribute("data-mirror-style", "");
+    style.appendChild(document.createTextNode(css));
+    document.head.appendChild(style);
+  })();
+  // Tagline element — short message that flashes when entering or leaving
+  // the mirror. Lives top-center so it reads from either orientation, but
+  // because the page is scaleX(-1) the text itself will appear mirrored —
+  // that's the joke; you'll still recognize the shape of the word.
+  function ensureMirrorTag() {
+    if (mirrorTagEl) return mirrorTagEl;
+    mirrorTagEl = document.createElement("div");
+    mirrorTagEl.setAttribute("aria-live", "polite");
+    mirrorTagEl.style.cssText = [
+      "position:fixed",
+      "top:clamp(20px, 4vh, 36px)",
+      "left:50%",
+      "transform:translateX(-50%)",
+      "z-index:60",
+      "pointer-events:none",
+      "font-family:var(--mono, ui-monospace, SFMono-Regular, Menlo, monospace)",
+      "font-size:clamp(11px, 1.1vw, 13px)",
+      "letter-spacing:0.36em",
+      "text-transform:uppercase",
+      "color:rgba(255,255,255,0.92)",
+      "white-space:nowrap",
+      "opacity:0",
+      "transition:opacity 320ms ease",
+    ].join(";");
+    document.body.appendChild(mirrorTagEl);
+    return mirrorTagEl;
+  }
+  function flashMirrorTag(text) {
+    const el = ensureMirrorTag();
+    el.textContent = text;
+    el.style.opacity = "1";
+    if (mirrorTagTimer) clearTimeout(mirrorTagTimer);
+    mirrorTagTimer = setTimeout(() => {
+      if (mirrorTagEl) mirrorTagEl.style.opacity = "0";
+    }, 1400);
+  }
+  function applyMirror(on) {
+    const want = !!on;
+    if (want === mirrored) return;
+    mirrored = want;
+    document.documentElement.classList.toggle("mirror", mirrored);
+    flashMirrorTag(mirrored ? "MIRROR." : "RETURNED");
+    // Audio panning: flip the presence panner so peer cursors that were
+    // panning right now pan left. Only one node — peer-cursor glissando —
+    // because most other voices are routed through .toDestination() and
+    // mono-summed. This is enough for the temporal/sonic inversion effect.
+    if (presencePanner && presencePanner.pan) {
+      try { presencePanner.pan.value = -presencePanner.pan.value; } catch {}
+    }
+  }
+  function broadcastMirror(on) {
+    fetch(`${SYNC_BASE}/event`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ type: "mirror", on: !!on, from: SELF_ID }),
+      keepalive: true,
+    }).catch(() => {});
+  }
+  // Make these visible to the SSE handler below via window-scoped reference.
+  // (Kept simple: we bolt onto a private property the handler can pick up.)
+  window.__mayorApplyMirror = applyMirror;
+
   // Separate keydown — won't interfere with konami because we ignore when
   // the user is mid-typing in an input/textarea, and we only act on bare keys.
-  // Handles 'g' (galaxy) and '1'..'9' (dimension portals).
+  // Handles 'g' (galaxy), '1'..'9' (dimension portals), and 'i' (mirror).
   window.addEventListener("keydown", (e) => {
     if (e.defaultPrevented) return;
     const tag = (e.target && e.target.tagName) || "";
@@ -3354,6 +3440,12 @@ export function initMotion(gsap) {
     if (e.key === "g" || e.key === "G") {
       if (galaxyEl && galaxyEl.classList.contains("open")) closeGalaxy();
       else openGalaxy();
+      return;
+    }
+    if (e.key === "i" || e.key === "I") {
+      const next = !mirrored;
+      applyMirror(next);
+      broadcastMirror(next);
       return;
     }
     // Dimension portals 1..9 — bare keypress jumps the whole room.

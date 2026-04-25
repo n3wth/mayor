@@ -212,6 +212,7 @@ let currentTempo = 60; // shared BPM
 let currentLamp = false; // light/dark for everyone
 let currentChord = "Am"; // shared chord — "conductor" can jump the cycle
 let currentDim = 1; // 1..9 — dimension portal index (visual+sonic universe)
+let currentMirror = false; // when true, the whole page is mirrored + inverted for everyone
 
 // Step sequencer grid: 5 letters × 16 steps, all booleans. Persists in memory
 // across visitors so what one person makes is what the next person walks into.
@@ -377,6 +378,7 @@ function handleEvents(req, res) {
   res.write(`data: ${JSON.stringify({ type: "lamp", on: currentLamp })}\n\n`);
   res.write(`data: ${JSON.stringify({ type: "chord", chord: currentChord })}\n\n`);
   res.write(`data: ${JSON.stringify({ type: "dim", dim: currentDim })}\n\n`);
+  res.write(`data: ${JSON.stringify({ type: "mirror", on: currentMirror })}\n\n`);
   res.write(`data: ${JSON.stringify({ type: "grid", grid })}\n\n`);
   res.write(`data: ${JSON.stringify({ type: "presence", count: sseClients.size + 1 })}\n\n`);
   sseClients.add(res);
@@ -416,7 +418,7 @@ async function handleEventPublish(req, res) {
   let body;
   try { body = JSON.parse(raw); } catch { return j(res, 400, { error: "bad json" }); }
   // Whitelist allowed event types and clamp coords.
-  const allowed = new Set(["click", "hover", "wave", "tab", "color", "mode", "word", "vibe", "tempo", "confetti", "lamp", "step", "clear", "ptr", "kick", "chord", "paint", "dim", "rewind", "forward", "snapshot"]);
+  const allowed = new Set(["click", "hover", "wave", "tab", "color", "mode", "word", "vibe", "tempo", "confetti", "lamp", "step", "clear", "ptr", "kick", "chord", "paint", "dim", "rewind", "forward", "snapshot", "mirror"]);
   const type = allowed.has(body.type) ? body.type : null;
   if (!type) return j(res, 400, { error: "bad type" });
   // ptr (cursor presence) gets its own looser bucket; everything else uses
@@ -500,6 +502,13 @@ async function handleEventPublish(req, res) {
     const d = Math.max(1, Math.min(9, Math.round(Number(body.dim) || 1)));
     currentDim = d;
     broadcast({ type: "dim", dim: currentDim, from, ts: Date.now() });
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    return j(res, 202, { ok: true });
+  }
+
+  if (type === "mirror") {
+    currentMirror = !!body.on;
+    broadcast({ type: "mirror", on: currentMirror, from, ts: Date.now() });
     res.setHeader("Access-Control-Allow-Origin", "*");
     return j(res, 202, { ok: true });
   }
