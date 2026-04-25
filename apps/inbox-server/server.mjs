@@ -209,6 +209,7 @@ let currentWord = "en"; // key in WORDS dict on the front-end
 let currentVibe = "default"; // background palette/mood
 let currentTempo = 60; // shared BPM
 let currentLamp = false; // light/dark for everyone
+let currentDim = 1; // 1..9 — dimension portal index (visual+sonic universe)
 
 // Step sequencer grid: 5 letters × 16 steps, all booleans. Persists in memory
 // across visitors so what one person makes is what the next person walks into.
@@ -266,6 +267,7 @@ function handleEvents(req, res) {
   res.write(`data: ${JSON.stringify({ type: "vibe", vibe: currentVibe })}\n\n`);
   res.write(`data: ${JSON.stringify({ type: "tempo", tempo: currentTempo })}\n\n`);
   res.write(`data: ${JSON.stringify({ type: "lamp", on: currentLamp })}\n\n`);
+  res.write(`data: ${JSON.stringify({ type: "dim", dim: currentDim })}\n\n`);
   res.write(`data: ${JSON.stringify({ type: "grid", grid })}\n\n`);
   res.write(`data: ${JSON.stringify({ type: "presence", count: sseClients.size + 1 })}\n\n`);
   sseClients.add(res);
@@ -304,7 +306,7 @@ async function handleEventPublish(req, res) {
   let body;
   try { body = JSON.parse(raw); } catch { return j(res, 400, { error: "bad json" }); }
   // Whitelist allowed event types and clamp coords.
-  const allowed = new Set(["click", "hover", "wave", "tab", "color", "mode", "word", "vibe", "tempo", "confetti", "lamp", "step", "clear"]);
+  const allowed = new Set(["click", "hover", "wave", "tab", "color", "mode", "word", "vibe", "tempo", "confetti", "lamp", "step", "clear", "dim"]);
   const type = allowed.has(body.type) ? body.type : null;
   if (!type) return j(res, 400, { error: "bad type" });
   // 'from' is a stable per-tab nonce so peers can ignore their own echoes.
@@ -364,6 +366,14 @@ async function handleEventPublish(req, res) {
   if (type === "lamp") {
     currentLamp = !!body.on;
     broadcast({ type: "lamp", on: currentLamp, from, ts: Date.now() });
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    return j(res, 202, { ok: true });
+  }
+
+  if (type === "dim") {
+    const d = Math.max(1, Math.min(9, Math.round(Number(body.dim) || 1)));
+    currentDim = d;
+    broadcast({ type: "dim", dim: currentDim, from, ts: Date.now() });
     res.setHeader("Access-Control-Allow-Origin", "*");
     return j(res, 202, { ok: true });
   }

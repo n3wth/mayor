@@ -33,6 +33,9 @@ function initField(canvas) {
     uniform float u_pulseAge;
     uniform float u_psy;     // 0..1 — psychedelic depth (drifts over time)
     uniform float u_chaos;   // 0..1 — chaos burst (event-driven, decays fast)
+    uniform vec3 u_deep;     // dimension portal: deep tone
+    uniform vec3 u_mid;      // dimension portal: mid tone
+    uniform vec3 u_hi;       // dimension portal: hi tone
 
     float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
     float noise(vec2 p) {
@@ -82,9 +85,9 @@ function initField(canvas) {
       vec2 q = vec2(fbm(p + t), fbm(p - t * 0.6));
       float n = fbm(p * 1.5 + q * (0.4 + u_intensity * 0.4 + u_psy * 0.6));
 
-      vec3 deep = vec3(0.42, 0.36, 0.05);
-      vec3 mid_ = vec3(0.78, 0.69, 0.12);
-      vec3 hi   = vec3(1.00, 0.83, 0.27);
+      vec3 deep = u_deep;
+      vec3 mid_ = u_mid;
+      vec3 hi   = u_hi;
 
       float light1 = smoothstep(1.5, 0.0, d1);
       float light2 = smoothstep(1.3, 0.0, d2);
@@ -158,6 +161,9 @@ function initField(canvas) {
     pulseAge: gl.getUniformLocation(prog, "u_pulseAge"),
     psy: gl.getUniformLocation(prog, "u_psy"),
     chaos: gl.getUniformLocation(prog, "u_chaos"),
+    deep: gl.getUniformLocation(prog, "u_deep"),
+    mid: gl.getUniformLocation(prog, "u_mid"),
+    hi: gl.getUniformLocation(prog, "u_hi"),
   };
 
   const SCALE = 0.5;
@@ -171,7 +177,13 @@ function initField(canvas) {
   resize();
   window.addEventListener("resize", resize);
 
-  let state = { intensity: 0, mouse: [0.5, 0.5], pulse: [0.5, 0.5], pulseStart: -10, psy: 0, chaos: 0 };
+  let state = {
+    intensity: 0, mouse: [0.5, 0.5], pulse: [0.5, 0.5], pulseStart: -10, psy: 0, chaos: 0,
+    // Default yellow-cathedral palette (matches the originally-baked vec3s).
+    deep: [0.42, 0.36, 0.05],
+    mid:  [0.78, 0.69, 0.12],
+    hi:   [1.00, 0.83, 0.27],
+  };
   const t0 = performance.now();
   let raf = 0;
   let paused = false;
@@ -187,6 +199,9 @@ function initField(canvas) {
       gl.uniform1f(u.pulseAge, t - state.pulseStart);
       gl.uniform1f(u.psy, state.psy);
       gl.uniform1f(u.chaos, state.chaos);
+      gl.uniform3f(u.deep, state.deep[0], state.deep[1], state.deep[2]);
+      gl.uniform3f(u.mid,  state.mid[0],  state.mid[1],  state.mid[2]);
+      gl.uniform3f(u.hi,   state.hi[0],   state.hi[1],   state.hi[2]);
       // Chaos decays naturally each frame so the JS just bumps it.
       state.chaos *= 0.94;
       gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
@@ -203,6 +218,11 @@ function initField(canvas) {
     triggerPulse: (x, y) => {
       state.pulse = [x, y];
       state.pulseStart = (performance.now() - t0) / 1000;
+    },
+    setColors: (deep, mid, hi) => {
+      if (Array.isArray(deep) && deep.length === 3) state.deep = deep.map((v) => +v || 0);
+      if (Array.isArray(mid)  && mid.length  === 3) state.mid  = mid.map((v)  => +v || 0);
+      if (Array.isArray(hi)   && hi.length   === 3) state.hi   = hi.map((v)   => +v || 0);
     },
     destroy: () => { cancelAnimationFrame(raf); window.removeEventListener("resize", resize); },
   };
@@ -720,6 +740,69 @@ function pluck(note, when = 0, vel = 0.7) {
     pluckSynth.triggerAttackRelease(note, "8n", when || Tone.now(), vel);
   } catch {}
 }
+
+// ── DIMENSION PORTALS ────────────────────────────────────────────────────
+// Press 1–9 to jump the entire room into a different visual+sonic universe.
+// Each dimension swaps the field shader's deep/mid/hi vec3s and rebuilds the
+// kick + lead voices with a new timbre (oscillator type, pitch, envelope).
+// Server holds currentDim and snapshots on connect, so a peer joining mid-trip
+// lands in the same dimension everyone else is already in.
+const DIMENSIONS = [
+  // 1 — yellow cathedral (the original mayor home).
+  {
+    name: "yellow cathedral",
+    deep: [0.42, 0.36, 0.05], mid: [0.78, 0.69, 0.12], hi: [1.00, 0.83, 0.27],
+    kickType: "membrane", kickPitch: 130, leadType: "triangle",
+  },
+  // 2 — deep ocean: cold blue, slow membrane thuds, sine lead.
+  {
+    name: "deep ocean",
+    deep: [0.02, 0.08, 0.18], mid: [0.06, 0.28, 0.52], hi: [0.45, 0.78, 0.95],
+    kickType: "membrane", kickPitch: 70, leadType: "sine",
+  },
+  // 3 — neon city: magenta + cyan, punchy kick, square lead.
+  {
+    name: "neon city",
+    deep: [0.10, 0.02, 0.18], mid: [0.78, 0.10, 0.62], hi: [0.30, 0.95, 1.00],
+    kickType: "membrane", kickPitch: 160, leadType: "square",
+  },
+  // 4 — forest dawn: mossy greens, soft round kick, sine lead.
+  {
+    name: "forest dawn",
+    deep: [0.05, 0.15, 0.08], mid: [0.30, 0.58, 0.22], hi: [0.85, 0.95, 0.55],
+    kickType: "membrane", kickPitch: 100, leadType: "sine",
+  },
+  // 5 — hellfire: blood-red, hard sub kick, sawtooth lead.
+  {
+    name: "hellfire",
+    deep: [0.25, 0.02, 0.02], mid: [0.78, 0.10, 0.05], hi: [1.00, 0.55, 0.10],
+    kickType: "membrane", kickPitch: 50, leadType: "sawtooth",
+  },
+  // 6 — void: near-black with a faint cold violet.
+  {
+    name: "void",
+    deep: [0.01, 0.01, 0.02], mid: [0.06, 0.04, 0.10], hi: [0.42, 0.36, 0.62],
+    kickType: "membrane", kickPitch: 40, leadType: "sine",
+  },
+  // 7 — glass garden: pastel pinks + ice-mint, glassy kick, triangle lead.
+  {
+    name: "glass garden",
+    deep: [0.18, 0.10, 0.20], mid: [0.95, 0.70, 0.85], hi: [0.75, 1.00, 0.92],
+    kickType: "membrane", kickPitch: 200, leadType: "triangle",
+  },
+  // 8 — cosmic static: deep purple/indigo, fizzing kick, square lead.
+  {
+    name: "cosmic static",
+    deep: [0.05, 0.02, 0.18], mid: [0.30, 0.18, 0.62], hi: [0.92, 0.85, 1.00],
+    kickType: "membrane", kickPitch: 90, leadType: "square",
+  },
+  // 9 — lava lamp: orange + crimson on warm umber, slow round kick, triangle.
+  {
+    name: "lava lamp",
+    deep: [0.18, 0.05, 0.02], mid: [0.92, 0.32, 0.10], hi: [1.00, 0.78, 0.28],
+    kickType: "membrane", kickPitch: 60, leadType: "triangle",
+  },
+];
 
 // ── ENTRY POINT ──────────────────────────────────────────────────────────
 export function initMotion(gsap) {
@@ -1347,16 +1430,37 @@ export function initMotion(gsap) {
   }
 
   // Voices per letter — instantiated once when audio is enabled.
+  // The kick + lead are rebuilt whenever the dimension changes (timbre swap).
   let voices = null;
-  function ensureVoices() {
-    if (voices || !Tone) return voices;
-    const fx = new Tone.Reverb({ decay: 5, wet: 0.35 }).toDestination();
-    // Kick (M)
-    const kick = new Tone.MembraneSynth({
+  let voiceFx = null;
+  // Active dimension index (1..9). Read by ensureVoices on first build, and
+  // updated by applyDimension below — but applyDimension is also defined
+  // below, so we declare currentDim up here to dodge any TDZ surprises.
+  let currentDim = 1;
+  function buildKick(dim) {
+    const k = new Tone.MembraneSynth({
       pitchDecay: 0.04, octaves: 6,
+      oscillator: { type: "sine" },
       envelope: { attack: 0.001, decay: 0.4, sustain: 0, release: 0.6 },
     }).toDestination();
-    kick.volume.value = -6;
+    k.volume.value = -6;
+    if (dim && Number.isFinite(dim.kickPitch)) k._kickPitch = dim.kickPitch;
+    return k;
+  }
+  function buildLead(dim, fx) {
+    const l = new Tone.Synth({
+      oscillator: { type: (dim && dim.leadType) || "triangle" },
+      envelope: { attack: 0.005, decay: 0.4, sustain: 0.0, release: 1.0 },
+    }).connect(fx);
+    l.volume.value = -12;
+    return l;
+  }
+  function ensureVoices() {
+    if (voices || !Tone) return voices;
+    voiceFx = new Tone.Reverb({ decay: 5, wet: 0.35 }).toDestination();
+    const dim = DIMENSIONS[currentDim - 1] || DIMENSIONS[0];
+    // Kick (M)
+    const kick = buildKick(dim);
     // Snare/clap (A) — noise burst
     const snare = new Tone.NoiseSynth({
       noise: { type: "white" },
@@ -1374,14 +1478,10 @@ export function initMotion(gsap) {
       oscillator: { type: "sine" },
       envelope: { attack: 0.02, decay: 0.4, sustain: 0.4, release: 0.6 },
       filterEnvelope: { attack: 0.04, decay: 0.3, sustain: 0.4, release: 0.6, baseFrequency: 140, octaves: 2 },
-    }).connect(fx);
+    }).connect(voiceFx);
     bass.volume.value = -12;
-    // Lead (R) — pluck triangle through reverb
-    const lead = new Tone.Synth({
-      oscillator: { type: "triangle" },
-      envelope: { attack: 0.005, decay: 0.4, sustain: 0.0, release: 1.0 },
-    }).connect(fx);
-    lead.volume.value = -12;
+    // Lead (R) — pluck through reverb
+    const lead = buildLead(dim, voiceFx);
     voices = { kick, snare, hat, bass, lead };
     return voices;
   }
@@ -1393,7 +1493,10 @@ export function initMotion(gsap) {
     const chordIdx = Math.floor((Tone.Transport.seconds || 0) / (60 / Tone.Transport.bpm.value * 4 * 8)) % CHORDS.length;
     const ch = CHORDS[chordIdx] || CHORDS[0];
     try {
-      if (L === "M") voices.kick.triggerAttackRelease("C2", "8n", when, vel);
+      if (L === "M") {
+        const f = (voices.kick && voices.kick._kickPitch) || 65; // ~C2 default
+        voices.kick.triggerAttackRelease(f, "8n", when, vel);
+      }
       else if (L === "A") voices.snare.triggerAttackRelease("16n", when, vel * 0.8);
       else if (L === "Y") voices.hat.triggerAttackRelease("32n", when, vel * 0.5);
       else if (L === "O") voices.bass.triggerAttackRelease(ch.bass, "8n", when, vel * 0.7);
@@ -1457,6 +1560,28 @@ export function initMotion(gsap) {
   // Watch soundOn via a lightweight poll — toggleSound already starts Tone.
   setInterval(ensureSeqAudioRunning, 500);
 
+  // ── DIMENSION PORTAL APPLY ─────────────────────────────────────────────
+  // The shader colors update immediately on every change; the kick + lead
+  // voices are rebuilt only if audio has been initialized (otherwise they
+  // pick up the right timbre on first ensureVoices).
+  function applyDimension(n) {
+    const idx = Math.max(1, Math.min(9, n | 0));
+    const dim = DIMENSIONS[idx - 1];
+    if (!dim) return;
+    currentDim = idx;
+    // 1. Shader colors — always.
+    if (fieldHandle && fieldHandle.setColors) {
+      fieldHandle.setColors(dim.deep, dim.mid, dim.hi);
+    }
+    // 2. Drum kit timbre — only if voices already exist.
+    if (voices && Tone) {
+      try { voices.kick.dispose(); } catch {}
+      voices.kick = buildKick(dim);
+      try { voices.lead.dispose(); } catch {}
+      voices.lead = buildLead(dim, voiceFx);
+    }
+  }
+
   // ── PRESENCE / SYNC via SSE ──
   let es = null;
   function connectSync() {
@@ -1488,6 +1613,14 @@ export function initMotion(gsap) {
           // Grid snapshot — apply silently (no preview play).
           if (ev.type === "grid") {
             applyGrid(ev.grid);
+            return;
+          }
+          // Dimension portal sync. Snapshot on connect + peer-driven hops.
+          // Apply even when ev.from === SELF_ID is true (the snapshot has no
+          // 'from'), so guard the self-skip below by checking only after we
+          // route dimension events.
+          if (ev.type === "dim") {
+            applyDimension(ev.dim | 0);
             return;
           }
           if (ev.from === SELF_ID) return;
@@ -1829,12 +1962,13 @@ export function initMotion(gsap) {
     }
   }
   // Separate keydown — won't interfere with konami because we ignore when
-  // the user is mid-typing in an input/textarea, and we only act on bare 'g'.
+  // the user is mid-typing in an input/textarea, and we only act on bare keys.
+  // Handles 'g' (galaxy) and '1'..'9' (dimension portals).
   window.addEventListener("keydown", (e) => {
     if (e.defaultPrevented) return;
     const tag = (e.target && e.target.tagName) || "";
     if (tag === "INPUT" || tag === "TEXTAREA" || (e.target && e.target.isContentEditable)) return;
-    if (e.metaKey || e.ctrlKey || e.altKey) return;
+    if (e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return;
     if (e.key === "Escape" && galaxyEl && galaxyEl.classList.contains("open")) {
       closeGalaxy();
       return;
@@ -1842,6 +1976,18 @@ export function initMotion(gsap) {
     if (e.key === "g" || e.key === "G") {
       if (galaxyEl && galaxyEl.classList.contains("open")) closeGalaxy();
       else openGalaxy();
+      return;
+    }
+    // Dimension portals 1..9 — bare keypress jumps the whole room.
+    if (e.key >= "1" && e.key <= "9" && e.key.length === 1) {
+      const n = e.key.charCodeAt(0) - 48; // '1'..'9' → 1..9
+      applyDimension(n);
+      fetch(`${SYNC_BASE}/event`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ type: "dim", dim: n, from: SELF_ID }),
+        keepalive: true,
+      }).catch(() => {});
     }
   });
 
