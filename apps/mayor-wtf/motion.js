@@ -740,6 +740,7 @@ export function initMotion(gsap) {
     let last = 0;
     let lastTrail = 0;
     window.addEventListener("pointermove", (e) => {
+      lastInteractionAt = Date.now();
       haloX(e.clientX); haloY(e.clientY);
       dotX(e.clientX); dotY(e.clientY);
       const now = performance.now();
@@ -820,31 +821,19 @@ export function initMotion(gsap) {
   }
 
   // ── THE ROOM REMEMBERS ──
-  // Tab away → hero softens (scales down, blurs). Return → it inhales back
-  // with elastic settle. After 30s away, return triggers a soft welcome chord.
-  // Separate handler from the shader-pause one in initField — don't interfere.
+  // Tab away → hero softens. Return → it inhales back. After 30s, welcome chord.
   if (!reduced) {
     let hiddenAt = 0;
     document.addEventListener("visibilitychange", () => {
       if (document.hidden) {
         hiddenAt = Date.now();
-        gsap.to(".hero", {
-          scale: 0.92,
-          filter: "blur(4px)",
-          duration: 1.2,
-          ease: "power2.inOut",
-        });
+        gsap.to(".hero", { scale: 0.92, filter: "blur(4px)", duration: 1.2, ease: "power2.inOut" });
       } else {
         const away = Date.now() - hiddenAt;
         if (away < 600) {
           gsap.set(".hero", { scale: 1, filter: "blur(0px)" });
         } else {
-          gsap.to(".hero", {
-            scale: 1,
-            filter: "blur(0px)",
-            duration: 1.4,
-            ease: "elastic.out(1, 0.6)",
-          });
+          gsap.to(".hero", { scale: 1, filter: "blur(0px)", duration: 1.4, ease: "elastic.out(1, 0.6)" });
         }
         if (away > 30000 && soundOn) {
           pluck("A3", 0, 0.5);
@@ -854,6 +843,10 @@ export function initMotion(gsap) {
       }
     });
   }
+
+  // ── ECHO: idle replay of last click ──
+  let lastInteractionAt = Date.now();
+  let lastClick = null;
 
   // ── CLICK: ripple + note. The single most important interaction. ──
   function fireClick(clientX, clientY, isSelf = true) {
@@ -897,6 +890,12 @@ export function initMotion(gsap) {
   // Local click — fan out to peers + render locally.
   function onStageClick(e) {
     if (e.target.closest("a, .sound")) return;
+    lastInteractionAt = Date.now();
+    lastClick = {
+      x: e.clientX,
+      y: e.clientY,
+      note: noteForX(e.clientX / window.innerWidth),
+    };
     fireClick(e.clientX, e.clientY, true);
     fetch(`${SYNC_BASE}/event`, {
       method: "POST",
@@ -1022,8 +1021,6 @@ export function initMotion(gsap) {
   const pollInterval = setInterval(pollStats, 5000);
 
   // ── WIND CHIMES: the room sings to itself ──
-  // When sound is on, a soft pentatonic note plays at random intervals
-  // (every 6–18s) — even with no interaction. Ambient music; no nagging.
   function chime() {
     if (soundOn && !document.hidden) {
       const note = PENT[Math.floor(Math.random() * PENT.length)];
@@ -1038,12 +1035,24 @@ export function initMotion(gsap) {
   }
   setTimeout(chime, 10000);
 
+  // ── ECHO IDLE CHECK ──
+  function checkIdle() {
+    if (document.hidden) return;
+    if (!lastClick) return;
+    if (Date.now() - lastInteractionAt <= 12000) return;
+    if (ripplesHandle) ripplesHandle.add(lastClick.x, lastClick.y, false);
+    if (soundOn && pluckSynth) pluck(lastClick.note, 0, 0.3);
+    lastInteractionAt += 12000;
+  }
+  const idleInterval = setInterval(checkIdle, 1000);
+
   // ── CLEANUP ──
   const onPageHide = () => {
     clearInterval(pollInterval);
     clearTimeout(cacheTimer);
     window.removeEventListener("resize", onMagResize);
     if (heartbeatInterval) clearInterval(heartbeatInterval);
+    clearInterval(idleInterval);
     if (fieldHandle) fieldHandle.destroy();
     if (starsHandle) starsHandle.destroy();
     if (auroraHandle) auroraHandle.destroy();
@@ -1059,6 +1068,7 @@ export function initMotion(gsap) {
       clearTimeout(cacheTimer);
       window.removeEventListener("resize", onMagResize);
       if (heartbeatInterval) clearInterval(heartbeatInterval);
+      clearInterval(idleInterval);
       if (fieldHandle) fieldHandle.destroy();
       if (starsHandle) starsHandle.destroy();
       if (auroraHandle) auroraHandle.destroy();
