@@ -464,6 +464,42 @@ export function initMotion(gsap) {
     gsap.to(".hero", { scale: 1, duration: 1.6, ease: "elastic.out(1, 0.6)", delay: 0.45 });
   }
 
+  // ── THE ROOM REMEMBERS ──
+  // Tab away → hero softens (scales down, blurs). Return → it inhales back
+  // with elastic settle. After 30s away, return triggers a soft welcome chord.
+  // Separate handler from the shader-pause one in initField — don't interfere.
+  if (!reduced) {
+    let hiddenAt = 0;
+    document.addEventListener("visibilitychange", () => {
+      if (document.hidden) {
+        hiddenAt = Date.now();
+        gsap.to(".hero", {
+          scale: 0.92,
+          filter: "blur(4px)",
+          duration: 1.2,
+          ease: "power2.inOut",
+        });
+      } else {
+        const away = Date.now() - hiddenAt;
+        if (away < 600) {
+          gsap.set(".hero", { scale: 1, filter: "blur(0px)" });
+        } else {
+          gsap.to(".hero", {
+            scale: 1,
+            filter: "blur(0px)",
+            duration: 1.4,
+            ease: "elastic.out(1, 0.6)",
+          });
+        }
+        if (away > 30000 && soundOn) {
+          pluck("A3", 0, 0.5);
+          pluck("C4", 0.05, 0.45);
+          pluck("E4", 0.10, 0.45);
+        }
+      }
+    });
+  }
+
   // ── CLICK: ripple + note. The single most important interaction. ──
   function fireClick(clientX, clientY, isSelf = true) {
     const nx = clientX / window.innerWidth;
