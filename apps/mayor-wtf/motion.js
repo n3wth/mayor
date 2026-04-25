@@ -525,6 +525,32 @@ export function initMotion(gsap) {
     });
   });
 
+  // ── KONAMI: ↑↑↓↓←→←→ba — letters backflip, chord plays. ──
+  const KONAMI = ["ArrowUp", "ArrowUp", "ArrowDown", "ArrowDown", "ArrowLeft", "ArrowRight", "ArrowLeft", "ArrowRight", "b", "a"];
+  const konamiBuf = [];
+  window.addEventListener("keydown", (e) => {
+    konamiBuf.push(e.key);
+    if (konamiBuf.length > KONAMI.length) konamiBuf.shift();
+    if (konamiBuf.length !== KONAMI.length) return;
+    for (let i = 0; i < KONAMI.length; i++) {
+      if (konamiBuf[i] !== KONAMI[i]) return;
+    }
+    konamiBuf.length = 0;
+    gsap.to(letters, {
+      rotationX: "+=360",
+      duration: 1.4,
+      ease: "expo.inOut",
+      stagger: 0.1,
+      transformPerspective: 800,
+    });
+    if (soundOn) {
+      pluck("E3", 0, 0.6);
+      pluck("G3", 0, 0.5);
+      pluck("A3", 0, 0.5);
+      pluck("C4", 0, 0.5);
+    }
+  });
+
   // ── PRESENCE / SYNC via SSE ──
   let es = null;
   function connectSync() {
