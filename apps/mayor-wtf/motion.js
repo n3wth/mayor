@@ -90,7 +90,8 @@ function initField(canvas) {
     }
     float fbm(vec2 p) {
       float v = 0.0, a = 0.5;
-      for (int i = 0; i < 5; i++) { v += a * noise(p); p *= 2.07; a *= 0.5; }
+      // 3 octaves is plenty for this aesthetic; was 5.
+      for (int i = 0; i < 3; i++) { v += a * noise(p); p *= 2.07; a *= 0.5; }
       return v;
     }
 
@@ -183,10 +184,14 @@ function initField(canvas) {
     hi: gl.getUniformLocation(prog, "u_hi"),
   };
 
-  let dpr = Math.min(2, window.devicePixelRatio || 1);
+  // Render the field at HALF resolution. The noise is so soft that pixel
+  // doubling is invisible, and we cut shader work to ~25%.
+  let scale = 0.5;
   function resize() {
-    canvas.width = (canvas.clientWidth * dpr) | 0;
-    canvas.height = (canvas.clientHeight * dpr) | 0;
+    canvas.width = Math.max(1, (canvas.clientWidth * scale) | 0);
+    canvas.height = Math.max(1, (canvas.clientHeight * scale) | 0);
+    canvas.style.width = "100%";
+    canvas.style.height = "100%";
     gl.viewport(0, 0, canvas.width, canvas.height);
   }
   resize();
@@ -204,18 +209,22 @@ function initField(canvas) {
   const t0 = performance.now();
 
   let raf = 0;
+  let paused = false;
+  document.addEventListener("visibilitychange", () => { paused = document.hidden; });
   function tick() {
-    const t = (performance.now() - t0) / 1000;
-    gl.uniform2f(u.res, canvas.width, canvas.height);
-    gl.uniform1f(u.time, t);
-    gl.uniform1f(u.intensity, state.intensity);
-    gl.uniform2f(u.mouse, state.mouse[0], state.mouse[1]);
-    gl.uniform2f(u.pulse, state.pulse[0], state.pulse[1]);
-    gl.uniform1f(u.pulseAge, t - state.pulseStart);
-    gl.uniform3f(u.deep, state.deep[0], state.deep[1], state.deep[2]);
-    gl.uniform3f(u.mid, state.mid[0], state.mid[1], state.mid[2]);
-    gl.uniform3f(u.hi, state.hi[0], state.hi[1], state.hi[2]);
-    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+    if (!paused) {
+      const t = (performance.now() - t0) / 1000;
+      gl.uniform2f(u.res, canvas.width, canvas.height);
+      gl.uniform1f(u.time, t);
+      gl.uniform1f(u.intensity, state.intensity);
+      gl.uniform2f(u.mouse, state.mouse[0], state.mouse[1]);
+      gl.uniform2f(u.pulse, state.pulse[0], state.pulse[1]);
+      gl.uniform1f(u.pulseAge, t - state.pulseStart);
+      gl.uniform3f(u.deep, state.deep[0], state.deep[1], state.deep[2]);
+      gl.uniform3f(u.mid, state.mid[0], state.mid[1], state.mid[2]);
+      gl.uniform3f(u.hi, state.hi[0], state.hi[1], state.hi[2]);
+      gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+    }
     raf = requestAnimationFrame(tick);
   }
   raf = requestAnimationFrame(tick);
@@ -392,11 +401,14 @@ export function initMotion(gsap) {
   const tagstat = document.querySelector("[data-tagstat]");
 
   // ── FIELD + STREAM ──
+  // Stream (CPU canvas particles) is off by default — it's expensive and
+  // duplicates the field's noise feel. Field shader stays on (cheap, GPU).
   let fieldHandle = null, streamHandle = null;
-  let streamDensity = 12;
+  let streamDensity = 0;
   if (!reduced) {
     fieldHandle = initField(fieldCanvas);
-    streamHandle = initStream(streamCanvas, () => streamDensity);
+    // streamHandle = initStream(streamCanvas, () => streamDensity); // disabled for perf
+    if (streamCanvas) streamCanvas.style.display = "none";
   }
 
   // ── HERO ENTRANCE: cinematic letter reveal ──
@@ -442,29 +454,41 @@ export function initMotion(gsap) {
   }
 
   // ── CURSOR ──
+  // All cursor-driven transforms use gsap.quickTo so each pointermove is
+  // a few setters, not new tween objects. Was the worst hot path on the page.
   if (!reduced && halo && dot) {
     const haloX = gsap.quickTo(halo, "x", { duration: 0.55, ease: "power3.out" });
     const haloY = gsap.quickTo(halo, "y", { duration: 0.55, ease: "power3.out" });
     const dotX = gsap.quickTo(dot, "x", { duration: 0.10, ease: "power2.out" });
     const dotY = gsap.quickTo(dot, "y", { duration: 0.10, ease: "power2.out" });
+    const heroEl = document.querySelector(".hero");
+    const heroRotY = heroEl ? gsap.quickTo(heroEl, "rotationY", { duration: 1.0, ease: "power3.out" }) : null;
+    const heroRotX = heroEl ? gsap.quickTo(heroEl, "rotationX", { duration: 1.0, ease: "power3.out" }) : null;
+    if (heroEl) gsap.set(heroEl, { transformPerspective: 1400 });
+    const backX = gsap.quickTo(layers.back, "x", { duration: 1.2, ease: "power3.out" });
+    const backY = gsap.quickTo(layers.back, "y", { duration: 1.2, ease: "power3.out" });
+    const midX  = gsap.quickTo(layers.mid,  "x", { duration: 1.0, ease: "power3.out" });
+    const midY  = gsap.quickTo(layers.mid,  "y", { duration: 1.0, ease: "power3.out" });
+    const shineX = gsap.quickTo(layers.shine, "x", { duration: 0.8, ease: "power3.out" });
+    const shineY = gsap.quickTo(layers.shine, "y", { duration: 0.8, ease: "power3.out" });
+
+    let lastMove = 0;
     window.addEventListener("pointermove", (e) => {
+      // Halo + dot must follow precisely — they're the cursor.
       haloX(e.clientX); haloY(e.clientY);
       dotX(e.clientX); dotY(e.clientY);
+      // Throttle the heavier parallax updates to ~60fps frames worth.
+      const now = performance.now();
+      if (now - lastMove < 16) return;
+      lastMove = now;
       if (fieldHandle) fieldHandle.setMouse(e.clientX / window.innerWidth, 1 - e.clientY / window.innerHeight);
       const nx = e.clientX / window.innerWidth - 0.5;
       const ny = e.clientY / window.innerHeight - 0.5;
-      // Real 3D rotation: letters tilt with cursor like a sculpted slab.
-      // 12° max yaw, 8° max pitch — enough to feel sculptural, not jarring.
-      gsap.to(".hero", {
-        rotationY: nx * 12,
-        rotationX: -ny * 8,
-        duration: 1.2,
-        ease: "power3.out",
-        transformPerspective: 1400,
-      });
-      gsap.to(layers.back, { x: nx * 28, y: ny * 16, z: -40, duration: 1.4, ease: "power3.out" });
-      gsap.to(layers.mid,  { x: nx * -6, y: ny * -3, z: 20,  duration: 1.0, ease: "power3.out" });
-      gsap.to(layers.shine,{ x: nx * 36, y: ny * 22, z: 60,  duration: 0.8, ease: "power3.out" });
+      if (heroRotY) heroRotY(nx * 10);
+      if (heroRotX) heroRotX(-ny * 6);
+      backX(nx * 24); backY(ny * 14);
+      midX(nx * -5); midY(ny * -3);
+      shineX(nx * 30); shineY(ny * 18);
     }, { passive: true });
 
     document.querySelectorAll(".chip, .cta").forEach((el) => {
@@ -896,14 +920,12 @@ export function initMotion(gsap) {
   }
   function pressLetters() {
     if (reduced || !letters.length) return;
-    // Each beat: letters punch back in Z briefly, then spring forward.
-    letters.forEach((l, i) => {
-      gsap.fromTo(l,
-        { z: 0 },
-        { z: -22, duration: 0.06, ease: "power2.out", delay: i * 0.012 }
-      );
-      gsap.to(l, { z: 0, duration: 0.6, ease: E.bounce, delay: i * 0.012 + 0.06 });
-    });
+    // One tween, all letters as targets — much cheaper than per-letter loop.
+    gsap.fromTo(letters,
+      { z: 0 },
+      { z: -16, duration: 0.06, ease: "power2.out", overwrite: "auto" }
+    );
+    gsap.to(letters, { z: 0, duration: 0.5, ease: E.bounce, delay: 0.06, overwrite: "auto" });
   }
   function applyTempo(bpm, animate = true) {
     tempoBpm = Math.max(30, Math.min(180, bpm | 0));

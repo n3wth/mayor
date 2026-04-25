@@ -96,20 +96,11 @@
     transform-origin: 50% 60%;
     will-change: transform;
   }
-  /* Faux extrusion via stacked drop-shadows on the letter body. The shadow
-     stack length scales the perceived depth; angle is tied to cursor light. */
+  /* Faux extrusion: two cheap drop-shadows. 9-stack was killing GPU. */
   .hero .layer.mid svg {
     filter:
-      drop-shadow( 0px 1px 0 rgba(0,0,0,0.20))
-      drop-shadow( 0px 2px 0 rgba(0,0,0,0.22))
-      drop-shadow( 0px 3px 0 rgba(0,0,0,0.24))
-      drop-shadow( 0px 4px 0 rgba(0,0,0,0.26))
-      drop-shadow( 0px 5px 0 rgba(0,0,0,0.28))
-      drop-shadow( 0px 6px 0 rgba(0,0,0,0.30))
-      drop-shadow( 0px 8px 0 rgba(0,0,0,0.32))
-      drop-shadow( 0px 11px 14px rgba(0,0,0,0.55))
-      drop-shadow( 0px 28px 34px rgba(0,0,0,0.40));
-    transition: filter 0.4s cubic-bezier(.2,.8,.2,1);
+      drop-shadow(0px 4px 0 rgba(0,0,0,0.30))
+      drop-shadow(0px 22px 28px rgba(0,0,0,0.45));
   }
   .hero svg {
     width: min(96vw, 1500px);
@@ -154,8 +145,8 @@
   /* Soft halo behind */
   .hero .layer.back text {
     fill: var(--y-warm);
-    filter: blur(54px);
-    opacity: 0.35;
+    filter: blur(28px);
+    opacity: 0.32;
   }
   /* Body fill is controlled live via --letter-color (see above) */
   /* Crisp specular highlight pass — clipped to letters via SVG mask */
@@ -251,8 +242,8 @@
     border: 1px solid rgba(255,255,255,0.14);
     border-radius: 999px;
     background: linear-gradient(180deg, rgba(255,255,255,0.04) 0%, rgba(255,255,255,0) 60%), rgba(8,8,10,0.45);
-    -webkit-backdrop-filter: blur(24px) saturate(160%);
-    backdrop-filter: blur(24px) saturate(160%);
+    -webkit-backdrop-filter: blur(12px);
+    backdrop-filter: blur(12px);
     box-shadow:
       inset 0 1px 0 rgba(255,255,255,0.08),
       inset 0 -1px 0 rgba(0,0,0,0.6),
@@ -295,8 +286,8 @@
     padding: 8px 12px;
     border-radius: 999px;
     background: rgba(8,8,10,0.45);
-    -webkit-backdrop-filter: blur(18px) saturate(160%);
-    backdrop-filter: blur(18px) saturate(160%);
+    -webkit-backdrop-filter: blur(10px);
+    backdrop-filter: blur(10px);
     border: 1px solid rgba(255,255,255,0.08);
   }
   .pill button {
@@ -349,8 +340,8 @@
     border-radius: 999px;
     border: 1px solid rgba(255,255,255,0.10);
     background: rgba(8,8,10,0.45);
-    -webkit-backdrop-filter: blur(18px) saturate(160%);
-    backdrop-filter: blur(18px) saturate(160%);
+    -webkit-backdrop-filter: blur(10px);
+    backdrop-filter: blur(10px);
     display: inline-flex;
     gap: 8px;
     align-items: center;
@@ -373,8 +364,8 @@
     border: 1px solid rgba(255,255,255,0.14);
     border-radius: 999px;
     background: rgba(8,8,10,0.45);
-    -webkit-backdrop-filter: blur(18px) saturate(160%);
-    backdrop-filter: blur(18px) saturate(160%);
+    -webkit-backdrop-filter: blur(10px);
+    backdrop-filter: blur(10px);
     color: var(--w);
     font-family: var(--mono);
     font-size: 10.5px;
@@ -388,6 +379,109 @@
 
   /* Toolbox layout — wrap nicely on small screens */
   .toolbox { flex-wrap: wrap; justify-content: center; max-width: 92vw; gap: 8px; }
+
+  /* ── STEP SEQUENCER GRID ─────────────────────────────────────── */
+  /* 5 rows (M/A/Y/O/R) × 16 steps. Tiny squares; toggleable. Glassy.
+     Sits centered, just above the toolbox. */
+  .seq {
+    position: absolute;
+    left: 50%;
+    bottom: clamp(168px, 24vh, 240px);
+    transform: translateX(-50%);
+    z-index: 13;
+    pointer-events: auto;
+    display: grid;
+    grid-template-columns: 24px repeat(16, 1fr);
+    gap: 4px;
+    padding: 12px 14px;
+    border-radius: 14px;
+    background: rgba(8,8,10,0.45);
+    -webkit-backdrop-filter: blur(10px);
+    backdrop-filter: blur(10px);
+    border: 1px solid rgba(255,255,255,0.08);
+    box-shadow:
+      inset 0 1px 0 rgba(255,255,255,0.06),
+      0 30px 60px -30px rgba(0,0,0,0.85);
+  }
+  .seq.hidden { opacity: 0; pointer-events: none; transform: translate(-50%, 12px); transition: opacity .4s, transform .4s; }
+  .seq .row-label {
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: rgba(255,255,255,0.55);
+    align-self: center;
+    text-align: center;
+  }
+  .seq button {
+    width: clamp(14px, 1.6vw, 22px);
+    height: clamp(14px, 1.6vw, 22px);
+    border-radius: 4px;
+    border: 1px solid rgba(255,255,255,0.10);
+    background: rgba(255,255,255,0.03);
+    cursor: pointer;
+    padding: 0;
+    transition: background .12s ease, transform .12s ease, box-shadow .12s ease;
+  }
+  .seq button:hover { background: rgba(255,255,255,0.10); }
+  .seq button.on {
+    background: var(--y);
+    border-color: var(--y);
+    box-shadow: 0 0 12px rgba(240,215,42,0.55);
+  }
+  .seq button.playing { transform: scale(1.18); box-shadow: 0 0 18px rgba(255,255,255,0.4); }
+  /* Beat indicator strip above the grid */
+  .seq .head {
+    grid-column: 2 / -1;
+    display: grid;
+    grid-template-columns: repeat(16, 1fr);
+    gap: 4px;
+    margin-bottom: 2px;
+    grid-row: 1;
+  }
+  .seq .head span {
+    height: 3px;
+    border-radius: 2px;
+    background: rgba(255,255,255,0.06);
+  }
+  .seq .head span.beat { background: rgba(255,255,255,0.20); }
+  .seq .head span.now { background: var(--y); box-shadow: 0 0 8px var(--y); }
+
+  /* Dimension indicator — top-center pill, shows current dimension 1-6 */
+  .dim {
+    position: absolute;
+    top: clamp(22px, 3vw, 32px);
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 12;
+    pointer-events: auto;
+    padding: 6px 14px;
+    border-radius: 999px;
+    background: rgba(8,8,10,0.45);
+    -webkit-backdrop-filter: blur(10px);
+    backdrop-filter: blur(10px);
+    border: 1px solid rgba(255,255,255,0.10);
+    font-family: var(--mono);
+    font-size: 10.5px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: rgba(255,255,255,0.85);
+    display: inline-flex;
+    gap: 10px;
+    align-items: center;
+  }
+  .dim .key {
+    background: rgba(255,255,255,0.08);
+    border: 1px solid rgba(255,255,255,0.12);
+    border-radius: 4px;
+    padding: 1px 6px;
+    color: rgba(255,255,255,0.65);
+    cursor: pointer;
+    font-family: var(--mono);
+    font-size: 10px;
+  }
+  .dim .key.active { background: var(--y); color: var(--k); border-color: var(--y); }
+  .dim .label { opacity: 0.7; }
 
   /* Confetti particle (different from existing .spark — bigger, slower, more chaotic) */
   .confetti {
@@ -428,8 +522,8 @@
     border: 1px solid rgba(255,255,255,0.10);
     border-radius: 999px;
     background: rgba(8,8,10,0.42);
-    -webkit-backdrop-filter: blur(18px) saturate(160%);
-    backdrop-filter: blur(18px) saturate(160%);
+    -webkit-backdrop-filter: blur(10px);
+    backdrop-filter: blur(10px);
     color: rgba(255,255,255,0.75);
     text-decoration: none;
     transition: border-color .35s ease, color .35s ease;
@@ -599,6 +693,30 @@
     <a class="chip" href="https://n3wth.com" rel="noopener">n3wth.com</a>
   </div>
 
+  <!-- Step sequencer — 5 voices × 16 steps. Each cell toggles a note. -->
+  <div class="seq" data-seq aria-label="Step sequencer">
+    <span></span>
+    <div class="head" data-seq-head>
+      <span></span><span></span><span></span><span></span>
+      <span class="beat"></span><span></span><span></span><span></span>
+      <span class="beat"></span><span></span><span></span><span></span>
+      <span class="beat"></span><span></span><span></span><span></span>
+    </div>
+    <!-- 5 rows × 16 cells injected by motion.js so cell handlers can be wired. -->
+  </div>
+
+  <!-- Dimension switcher — keyboard 1..6, also clickable -->
+  <div class="dim" data-dim>
+    <span class="label">dim</span>
+    <button class="key" data-d="1">1</button>
+    <button class="key" data-d="2">2</button>
+    <button class="key" data-d="3">3</button>
+    <button class="key" data-d="4">4</button>
+    <button class="key" data-d="5">5</button>
+    <button class="key" data-d="6">6</button>
+    <span class="label" data-dim-name>2D · flat</span>
+  </div>
+
   <!-- Live shared toolbox — click a letter, then color/mode. Word/vibe/tempo are global. -->
   <div class="toolbox" aria-label="Letter style">
     <div class="pill palette" data-palette>
@@ -694,6 +812,7 @@
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/gsap.min.js" defer></script>
+<script src="https://cdn.jsdelivr.net/npm/tone@15.0.4/build/Tone.js" defer></script>
 <script type="module">
   import { initMotion } from "/motion.js";
   const ready = () => (window.gsap ? initMotion(window.gsap) : requestAnimationFrame(ready));
