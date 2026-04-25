@@ -486,9 +486,25 @@ function initRipples(canvas) {
         const age = (now - r.t0) / 1000;
         if (age > 2.6) { ripples.splice(i, 1); continue; }
         const radius = age * 320 * dpr;
-        const alpha = Math.max(0, 1 - age / 2.6) * (r.self ? 0.85 : 0.55);
-        ctx.strokeStyle = `rgba(255, 220, 80, ${alpha})`;
-        ctx.lineWidth = (r.self ? 2.2 : 1.6) * dpr;
+        const fade = Math.max(0, 1 - age / 2.6);
+        // Ghost ripples: subtle white outline. Self: bright yellow.
+        // Peer: dimmer yellow.
+        let alpha, color, lw;
+        if (r.ghost) {
+          alpha = fade * 0.5 * (r.softness ?? 1);
+          color = `rgba(235, 235, 240, ${alpha})`;
+          lw = 1.4 * dpr;
+        } else if (r.self) {
+          alpha = fade * 0.85;
+          color = `rgba(255, 220, 80, ${alpha})`;
+          lw = 2.2 * dpr;
+        } else {
+          alpha = fade * 0.55;
+          color = `rgba(255, 220, 80, ${alpha})`;
+          lw = 1.6 * dpr;
+        }
+        ctx.strokeStyle = color;
+        ctx.lineWidth = lw;
         ctx.beginPath();
         ctx.arc(r.x * dpr, r.y * dpr, radius, 0, Math.PI * 2);
         ctx.stroke();
@@ -499,8 +515,10 @@ function initRipples(canvas) {
   raf = requestAnimationFrame(tick);
 
   return {
-    add: (x, y, self = false) => {
-      ripples.push({ x, y, self, t0: performance.now() });
+    add: (x, y, self = false, opts = null) => {
+      const ghost = !!(opts && opts.ghost);
+      const softness = opts && typeof opts.softness === "number" ? opts.softness : 1;
+      ripples.push({ x, y, self, ghost, softness, t0: performance.now() });
       if (ripples.length > 24) ripples.shift();
     },
     destroy: () => { cancelAnimationFrame(raf); window.removeEventListener("resize", resize); },
@@ -751,6 +769,16 @@ export function initMotion(gsap) {
   // Echo: idle-replay state (referenced from pointermove/click handlers below)
   let lastInteractionAt = Date.now();
   let lastClick = null;
+  // Ghost recorder: 'r' captures clicks (cursor x/y + t + note) for up to 16s,
+  // then loops them back as soft echoes for 4 fading cycles. Esc cancels.
+  const ghostState = {
+    recording: false,
+    startedAt: 0,
+    events: [],
+    playbackTimers: [],
+    indicatorEl: null,
+    recordTimeout: null,
+  };
 
   let fieldHandle = null, starsHandle = null, auroraHandle = null, ripplesHandle = null, trailHandle = null;
   if (!reduced) {
@@ -1020,11 +1048,21 @@ export function initMotion(gsap) {
   function onStageClick(e) {
     if (e.target.closest("a, .sound")) return;
     lastInteractionAt = Date.now();
+    const note = noteForX(e.clientX / window.innerWidth);
     lastClick = {
       x: e.clientX,
       y: e.clientY,
-      note: noteForX(e.clientX / window.innerWidth),
+      note,
     };
+    // Ghost recorder: capture click into the active recording reel.
+    if (ghostState.recording) {
+      ghostState.events.push({
+        x: e.clientX,
+        y: e.clientY,
+        t: Date.now() - ghostState.startedAt,
+        note,
+      });
+    }
     fireClick(e.clientX, e.clientY, true);
     fetch(`${SYNC_BASE}/event`, {
       method: "POST",
@@ -1045,6 +1083,152 @@ export function initMotion(gsap) {
       e.stopPropagation();
       onStageClick(e);
     });
+  });
+
+  // ── GHOST RECORDER ───────────────────────────────────────────────────
+  // 'r' starts recording the visitor's clicks (x,y,t,note). 'r' again stops
+  // and immediately schedules a 4-cycle playback loop, each ~10% softer.
+  // Recording auto-caps at 16s. Min 1s of recording is required to play.
+  // Esc cancels playback mid-loop. Ghost ripples render with a subtle
+  // white outline so they're distinguishable from yellow self/peer clicks.
+  const GHOST_MAX_MS = 16000;
+  const GHOST_MIN_MS = 1000;
+  const GHOST_CYCLES = 4;
+
+  // Inject the indicator style once. Flat, minimal — a small dot + label.
+  if (!document.getElementById("ghost-style")) {
+    const gs = document.createElement("style");
+    gs.id = "ghost-style";
+    gs.textContent = `
+      .ghost-indicator {
+        position: absolute;
+        bottom: clamp(38px, 6vh, 64px);
+        right: calc(clamp(22px, 3vw, 32px) + 110px);
+        z-index: 12;
+        pointer-events: none;
+        padding: 8px 12px;
+        border-radius: 999px;
+        border: 1px solid rgba(220, 70, 70, 0.55);
+        background: rgba(8,8,10,0.45);
+        color: rgba(235, 110, 110, 0.95);
+        font-family: var(--mono);
+        font-size: 10.5px;
+        letter-spacing: 0.18em;
+        text-transform: uppercase;
+        opacity: 0;
+        transition: opacity .35s ease;
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+      }
+      .ghost-indicator.on { opacity: 1; }
+      .ghost-indicator .dot {
+        width: 7px; height: 7px;
+        border-radius: 50%;
+        background: rgb(235, 80, 80);
+        animation: ghost-rec-pulse 1.1s ease-in-out infinite;
+      }
+      @keyframes ghost-rec-pulse {
+        0%, 100% { opacity: 0.45; }
+        50% { opacity: 1; }
+      }
+    `;
+    document.head.appendChild(gs);
+  }
+
+  function ensureGhostIndicator() {
+    if (ghostState.indicatorEl) return ghostState.indicatorEl;
+    const el = document.createElement("div");
+    el.className = "ghost-indicator";
+    el.setAttribute("aria-live", "polite");
+    el.innerHTML = '<span class="dot"></span><span>rec</span>';
+    document.body.appendChild(el);
+    ghostState.indicatorEl = el;
+    return el;
+  }
+
+  function setGhostIndicator(on) {
+    const el = ensureGhostIndicator();
+    if (on) el.classList.add("on");
+    else el.classList.remove("on");
+  }
+
+  function startGhostRecording() {
+    cancelGhostPlayback();
+    ghostState.recording = true;
+    ghostState.startedAt = Date.now();
+    ghostState.events = [];
+    setGhostIndicator(true);
+    // Auto-stop after the cap so the loop can't run away.
+    ghostState.recordTimeout = setTimeout(() => {
+      if (ghostState.recording) stopGhostRecording();
+    }, GHOST_MAX_MS);
+  }
+
+  function stopGhostRecording() {
+    if (!ghostState.recording) return;
+    ghostState.recording = false;
+    if (ghostState.recordTimeout) {
+      clearTimeout(ghostState.recordTimeout);
+      ghostState.recordTimeout = null;
+    }
+    setGhostIndicator(false);
+    const elapsed = Date.now() - ghostState.startedAt;
+    // Need at least 1s of reel and at least one click to bother playing.
+    if (elapsed < GHOST_MIN_MS || ghostState.events.length === 0) {
+      ghostState.events = [];
+      return;
+    }
+    // Loop length is the recorded duration so the cycle period feels honest.
+    playGhostLoop(elapsed, ghostState.events.slice());
+  }
+
+  function playGhostLoop(loopMs, events) {
+    // Clear any prior reel still in the air.
+    cancelGhostPlayback();
+    for (let cycle = 0; cycle < GHOST_CYCLES; cycle++) {
+      const cycleStart = cycle * loopMs;
+      // Each cycle ~10% softer. Used for both ripple alpha and pluck velocity.
+      const softness = Math.pow(0.9, cycle);
+      for (const e of events) {
+        const id = setTimeout(() => {
+          // Drop self-references that fell outside the viewport on resize —
+          // ripple draw will clip naturally, but skip wildly out-of-bounds.
+          if (ripplesHandle) {
+            ripplesHandle.add(e.x, e.y, false, { ghost: true, softness });
+          }
+          if (soundOn && pluckSynth) {
+            pluck(e.note, 0, 0.4 * softness);
+          }
+        }, cycleStart + e.t);
+        ghostState.playbackTimers.push(id);
+      }
+    }
+  }
+
+  function cancelGhostPlayback() {
+    if (!ghostState.playbackTimers.length) return;
+    for (const id of ghostState.playbackTimers) clearTimeout(id);
+    ghostState.playbackTimers.length = 0;
+  }
+
+  // 'r' = toggle. Bare key only (no modifiers, not while typing).
+  // Esc cancels in-flight ghost playback (and the existing galaxy listener
+  // handles galaxy Esc separately — both can fire harmlessly).
+  window.addEventListener("keydown", (e) => {
+    if (e.defaultPrevented) return;
+    const tag = (e.target && e.target.tagName) || "";
+    if (tag === "INPUT" || tag === "TEXTAREA" || (e.target && e.target.isContentEditable)) return;
+    if (e.metaKey || e.ctrlKey || e.altKey) return;
+    if (e.key === "r" || e.key === "R") {
+      if (ghostState.recording) stopGhostRecording();
+      else startGhostRecording();
+      return;
+    }
+    if (e.key === "Escape") {
+      // Don't disrupt recording, just cancel any active loop.
+      cancelGhostPlayback();
+    }
   });
 
   // ── KONAMI: ↑↑↓↓←→←→ba — letters backflip, chord plays. ──
@@ -1853,6 +2037,8 @@ export function initMotion(gsap) {
     if (heartbeatInterval) clearInterval(heartbeatInterval);
     clearInterval(idleInterval);
     if (nightRaf) cancelAnimationFrame(nightRaf);
+    if (ghostState.recordTimeout) clearTimeout(ghostState.recordTimeout);
+    cancelGhostPlayback();
     if (fieldHandle) fieldHandle.destroy();
     if (starsHandle) starsHandle.destroy();
     if (auroraHandle) auroraHandle.destroy();
@@ -1870,6 +2056,8 @@ export function initMotion(gsap) {
       if (heartbeatInterval) clearInterval(heartbeatInterval);
       clearInterval(idleInterval);
       if (nightRaf) cancelAnimationFrame(nightRaf);
+      if (ghostState.recordTimeout) clearTimeout(ghostState.recordTimeout);
+      cancelGhostPlayback();
       if (fieldHandle) fieldHandle.destroy();
       if (starsHandle) starsHandle.destroy();
       if (auroraHandle) auroraHandle.destroy();
