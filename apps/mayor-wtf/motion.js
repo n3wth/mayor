@@ -1187,6 +1187,188 @@ export function initMotion(gsap) {
     }
   }, 1000);
 
+  // ── COLLABORATIVE STEP SEQUENCER ─────────────────────────────────────
+  // The whole page is the instrument. 5 letters × 16 steps. Everyone in
+  // the room edits the same grid in real time. Each letter has its own
+  // Tone.js voice; Tone.Transport runs the loop. Server-clock-aligned so
+  // every tab triggers steps simultaneously.
+  const SEQ_LETTERS = ["M", "A", "Y", "O", "R"];
+  const SEQ_STEPS = 16;
+  const seqEl = document.querySelector("[data-seq]");
+  const seqGrid = {};
+  for (const L of SEQ_LETTERS) seqGrid[L] = new Array(SEQ_STEPS).fill(false);
+
+  // Build the DOM grid: header strip + 5 letter rows.
+  if (seqEl) {
+    // Header (playhead row)
+    const head = document.createElement("div");
+    head.className = "head";
+    for (let i = 0; i < SEQ_STEPS; i++) {
+      const s = document.createElement("span");
+      if (i % 4 === 0) s.classList.add("beat");
+      head.appendChild(s);
+    }
+    seqEl.appendChild(head);
+    // 5 letter rows
+    for (const L of SEQ_LETTERS) {
+      const lab = document.createElement("div");
+      lab.className = "label";
+      lab.textContent = L;
+      seqEl.appendChild(lab);
+      for (let i = 0; i < SEQ_STEPS; i++) {
+        const c = document.createElement("button");
+        c.className = "cell";
+        c.dataset.letter = L;
+        c.dataset.idx = String(i);
+        c.addEventListener("click", (e) => {
+          e.stopPropagation();
+          const next = !seqGrid[L][i];
+          seqGrid[L][i] = next;
+          c.classList.toggle("on", next);
+          // Optimistic local: trigger sound preview if turning on
+          if (next && soundOn) playStep(L, Tone ? Tone.now() : 0, 0.6);
+          // Broadcast
+          fetch(`${SYNC_BASE}/event`, {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ type: "step", letter: L, idx: i, on: next, from: SELF_ID }),
+            keepalive: true,
+          }).catch(() => {});
+        });
+        seqEl.appendChild(c);
+      }
+    }
+  }
+
+  function applyGrid(g) {
+    if (!seqEl || !g) return;
+    for (const L of SEQ_LETTERS) {
+      const row = g[L] || [];
+      for (let i = 0; i < SEQ_STEPS; i++) {
+        seqGrid[L][i] = !!row[i];
+        const c = seqEl.querySelector(`.cell[data-letter="${L}"][data-idx="${i}"]`);
+        if (c) c.classList.toggle("on", !!row[i]);
+      }
+    }
+  }
+  function applyStepFromPeer(L, idx, on) {
+    if (!SEQ_LETTERS.includes(L) || idx < 0 || idx >= SEQ_STEPS) return;
+    seqGrid[L][idx] = !!on;
+    const c = seqEl?.querySelector(`.cell[data-letter="${L}"][data-idx="${idx}"]`);
+    if (c) c.classList.toggle("on", !!on);
+  }
+
+  // Voices per letter — instantiated once when audio is enabled.
+  let voices = null;
+  function ensureVoices() {
+    if (voices || !Tone) return voices;
+    const fx = new Tone.Reverb({ decay: 5, wet: 0.35 }).toDestination();
+    // Kick (M)
+    const kick = new Tone.MembraneSynth({
+      pitchDecay: 0.04, octaves: 6,
+      envelope: { attack: 0.001, decay: 0.4, sustain: 0, release: 0.6 },
+    }).toDestination();
+    kick.volume.value = -6;
+    // Snare/clap (A) — noise burst
+    const snare = new Tone.NoiseSynth({
+      noise: { type: "white" },
+      envelope: { attack: 0.001, decay: 0.18, sustain: 0 },
+    }).toDestination();
+    snare.volume.value = -14;
+    // Hi-hat (Y) — high noise short
+    const hat = new Tone.NoiseSynth({
+      noise: { type: "white" },
+      envelope: { attack: 0.001, decay: 0.05, sustain: 0 },
+    }).connect(new Tone.Filter(7000, "highpass").toDestination());
+    hat.volume.value = -22;
+    // Bass (O) — sine sub on chord roots
+    const bass = new Tone.MonoSynth({
+      oscillator: { type: "sine" },
+      envelope: { attack: 0.02, decay: 0.4, sustain: 0.4, release: 0.6 },
+      filterEnvelope: { attack: 0.04, decay: 0.3, sustain: 0.4, release: 0.6, baseFrequency: 140, octaves: 2 },
+    }).connect(fx);
+    bass.volume.value = -12;
+    // Lead (R) — pluck triangle through reverb
+    const lead = new Tone.Synth({
+      oscillator: { type: "triangle" },
+      envelope: { attack: 0.005, decay: 0.4, sustain: 0.0, release: 1.0 },
+    }).connect(fx);
+    lead.volume.value = -12;
+    voices = { kick, snare, hat, bass, lead };
+    return voices;
+  }
+
+  // Plays the voice associated with a letter at time `when` (Tone.js seconds).
+  function playStep(L, when, vel = 0.7) {
+    if (!Tone || !ensureVoices()) return;
+    // Chord-aware notes for bass + lead — harmonized to current chord cycle.
+    const chordIdx = Math.floor((Tone.Transport.seconds || 0) / (60 / Tone.Transport.bpm.value * 4 * 8)) % CHORDS.length;
+    const ch = CHORDS[chordIdx] || CHORDS[0];
+    try {
+      if (L === "M") voices.kick.triggerAttackRelease("C2", "8n", when, vel);
+      else if (L === "A") voices.snare.triggerAttackRelease("16n", when, vel * 0.8);
+      else if (L === "Y") voices.hat.triggerAttackRelease("32n", when, vel * 0.5);
+      else if (L === "O") voices.bass.triggerAttackRelease(ch.bass, "8n", when, vel * 0.7);
+      else if (L === "R") {
+        const note = ch.scale[(Math.random() * ch.scale.length) | 0] + (4 + ((Math.random() * 2) | 0));
+        voices.lead.triggerAttackRelease(note, "8n", when, vel * 0.55);
+      }
+    } catch {}
+  }
+
+  // Step loop. Drives all 5 voices off the same Tone.Transport position.
+  let stepLoop = null;
+  let stepIdx = 0;
+  function startStepLoop() {
+    if (!Tone || stepLoop) return;
+    Tone.Transport.bpm.value = 96;
+    Tone.Transport.start();
+    stepLoop = new Tone.Loop((time) => {
+      // Advance + render playhead
+      const i = stepIdx % SEQ_STEPS;
+      // Update visual playhead via DOM + letter pulse
+      if (seqEl) {
+        const heads = seqEl.querySelectorAll(".head span");
+        heads.forEach((s, k) => s.classList.toggle("now", k === i));
+        seqEl.querySelectorAll(".cell.now").forEach((c) => c.classList.remove("now"));
+      }
+      let anyHit = false;
+      for (const L of SEQ_LETTERS) {
+        if (!seqGrid[L][i]) continue;
+        anyHit = true;
+        playStep(L, time, 0.7);
+        if (seqEl) {
+          const c = seqEl.querySelector(`.cell[data-letter="${L}"][data-idx="${i}"]`);
+          if (c) {
+            c.classList.add("now");
+          }
+          // Letter glyph pulse
+          const letter = letters.find((l) => l.dataset.letter === L);
+          if (letter) {
+            gsap.fromTo(letter, { scale: 1 }, { scale: 1.06, duration: 0.06, ease: "power2.out", overwrite: "auto" });
+            gsap.to(letter, { scale: 1, duration: 0.4, ease: "elastic.out(1,0.6)", delay: 0.06, overwrite: "auto" });
+          }
+        }
+      }
+      if (anyHit && fieldHandle) fieldHandle.triggerPulse(0.5, 0.5);
+      stepIdx++;
+    }, "16n").start(0);
+  }
+  function stopStepLoop() {
+    if (stepLoop) { stepLoop.stop(); stepLoop.dispose(); stepLoop = null; }
+  }
+
+  // Hook into existing toggleSound so the sequencer engages with audio.
+  const _origStartGen = startGenerative;
+  // monkey-patch via re-binding in this scope:
+  function ensureSeqAudioRunning() {
+    if (!soundOn || !Tone) return;
+    ensureVoices();
+    startStepLoop();
+  }
+  // Watch soundOn via a lightweight poll — toggleSound already starts Tone.
+  setInterval(ensureSeqAudioRunning, 500);
+
   // ── PRESENCE / SYNC via SSE ──
   let es = null;
   function connectSync() {
@@ -1215,7 +1397,17 @@ export function initMotion(gsap) {
             if (starsHandle) starsHandle.setCount(n);
             return;
           }
+          // Grid snapshot — apply silently (no preview play).
+          if (ev.type === "grid") {
+            applyGrid(ev.grid);
+            return;
+          }
           if (ev.from === SELF_ID) return;
+          // Step toggle from a peer
+          if (ev.type === "step") {
+            applyStepFromPeer(ev.letter, ev.idx | 0, !!ev.on);
+            return;
+          }
           if (ev.type === "click" || ev.type === "tab") {
             const x = (ev.x ?? 0.5) * window.innerWidth;
             const y = (ev.y ?? 0.5) * window.innerHeight;

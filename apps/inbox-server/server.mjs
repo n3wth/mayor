@@ -209,6 +209,13 @@ let currentWord = "en"; // key in WORDS dict on the front-end
 let currentVibe = "default"; // background palette/mood
 let currentTempo = 60; // shared BPM
 let currentLamp = false; // light/dark for everyone
+
+// Step sequencer grid: 5 letters × 16 steps, all booleans. Persists in memory
+// across visitors so what one person makes is what the next person walks into.
+const LETTERS = ["M", "A", "Y", "O", "R"];
+const STEPS = 16;
+const grid = {};
+for (const L of LETTERS) grid[L] = new Array(STEPS).fill(false);
 const PALETTE = new Set([
   "#f0d72a", "#ffffff", "#ff8a3d", "#7dd3fc", "#a78bfa",
   "#34d399", "#f472b6", "#fb7185",
@@ -259,6 +266,7 @@ function handleEvents(req, res) {
   res.write(`data: ${JSON.stringify({ type: "vibe", vibe: currentVibe })}\n\n`);
   res.write(`data: ${JSON.stringify({ type: "tempo", tempo: currentTempo })}\n\n`);
   res.write(`data: ${JSON.stringify({ type: "lamp", on: currentLamp })}\n\n`);
+  res.write(`data: ${JSON.stringify({ type: "grid", grid })}\n\n`);
   res.write(`data: ${JSON.stringify({ type: "presence", count: sseClients.size + 1 })}\n\n`);
   sseClients.add(res);
   // Notify everyone else of the new presence count.
@@ -296,7 +304,7 @@ async function handleEventPublish(req, res) {
   let body;
   try { body = JSON.parse(raw); } catch { return j(res, 400, { error: "bad json" }); }
   // Whitelist allowed event types and clamp coords.
-  const allowed = new Set(["click", "hover", "wave", "tab", "color", "mode", "word", "vibe", "tempo", "confetti", "lamp"]);
+  const allowed = new Set(["click", "hover", "wave", "tab", "color", "mode", "word", "vibe", "tempo", "confetti", "lamp", "step", "clear"]);
   const type = allowed.has(body.type) ? body.type : null;
   if (!type) return j(res, 400, { error: "bad type" });
   // 'from' is a stable per-tab nonce so peers can ignore their own echoes.
@@ -356,6 +364,33 @@ async function handleEventPublish(req, res) {
   if (type === "lamp") {
     currentLamp = !!body.on;
     broadcast({ type: "lamp", on: currentLamp, from, ts: Date.now() });
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    return j(res, 202, { ok: true });
+  }
+
+  if (type === "step") {
+    const L = typeof body.letter === "string" ? body.letter.toUpperCase() : "";
+    const idx = body.idx | 0;
+    if (!grid[L]) return j(res, 400, { error: "bad letter" });
+    if (idx < 0 || idx >= STEPS) return j(res, 400, { error: "bad idx" });
+    const on = !!body.on;
+    grid[L][idx] = on;
+    broadcast({ type: "step", letter: L, idx, on, from, ts: Date.now() });
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    return j(res, 202, { ok: true });
+  }
+
+  if (type === "clear") {
+    const L = typeof body.letter === "string" ? body.letter.toUpperCase() : "";
+    if (L === "*") {
+      for (const k of LETTERS) grid[k] = new Array(STEPS).fill(false);
+      broadcast({ type: "grid", grid, from, ts: Date.now() });
+    } else if (grid[L]) {
+      grid[L] = new Array(STEPS).fill(false);
+      broadcast({ type: "grid", grid, from, ts: Date.now() });
+    } else {
+      return j(res, 400, { error: "bad letter" });
+    }
     res.setHeader("Access-Control-Allow-Origin", "*");
     return j(res, 202, { ok: true });
   }
