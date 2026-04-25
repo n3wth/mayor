@@ -806,6 +806,10 @@ export function initMotion(gsap) {
   // Echo: idle-replay state (referenced from pointermove/click handlers below)
   let lastInteractionAt = Date.now();
   let lastClick = null;
+  // Groove Evolver: separate "human just did something" timestamp. Bumped on
+  // any cell toggle, stage click, or window click. NOT bumped by pointermove
+  // alone — the agent should still wake when the cursor drifts.
+  let lastUserInteractionAt = Date.now();
 
   let fieldHandle = null, starsHandle = null, auroraHandle = null, ripplesHandle = null, trailHandle = null;
   if (!reduced) {
@@ -1092,6 +1096,7 @@ export function initMotion(gsap) {
   function onStageClick(e) {
     if (e.target.closest("a, .sound")) return;
     lastInteractionAt = Date.now();
+    lastUserInteractionAt = Date.now();
     lastClick = {
       x: e.clientX,
       y: e.clientY,
@@ -1294,6 +1299,7 @@ export function initMotion(gsap) {
         c.dataset.idx = String(i);
         c.addEventListener("click", (e) => {
           e.stopPropagation();
+          lastUserInteractionAt = Date.now();
           const next = !seqGrid[L][i];
           seqGrid[L][i] = next;
           c.classList.toggle("on", next);
@@ -1528,6 +1534,133 @@ export function initMotion(gsap) {
   }
   // Watch soundOn via a lightweight poll — toggleSound already starts Tone.
   setInterval(ensureSeqAudioRunning, 500);
+
+  // ── GROOVE EVOLVER ────────────────────────────────────────────────────
+  // After 30s of silence (empty grid + no interaction), an autonomous
+  // musician starts proposing notes. It fills cells across the 5 letter
+  // rows over ~16 bars, building a groove from sparse to full. Each
+  // addition is broadcast like a real toggle so the whole room hears it
+  // emerge. Stops the moment anyone interacts.
+  // Capture-phase window click so any click anywhere (incl. CTA, sound
+  // button, links) counts as user activity and silences the agent.
+  window.addEventListener("click", () => {
+    lastUserInteractionAt = Date.now();
+  }, { capture: true, passive: true });
+
+  // Inject a brief gold ring CSS keyframe + class. The class auto-removes
+  // after the animation runs once. Lives in a single style tag so we don't
+  // touch index.html.
+  (function injectAgentStyle() {
+    if (document.getElementById("groove-evolver-style")) return;
+    const style = document.createElement("style");
+    style.id = "groove-evolver-style";
+    style.textContent = [
+      "@keyframes grooveEvolverRing {",
+      "  0%   { box-shadow: 0 0 0 0 rgba(240,215,42,0.85); }",
+      "  60%  { box-shadow: 0 0 0 6px rgba(240,215,42,0.25); }",
+      "  100% { box-shadow: 0 0 0 10px rgba(240,215,42,0); }",
+      "}",
+      ".seq .cell.agent-add { animation: grooveEvolverRing 0.9s ease-out; }",
+    ].join("\n");
+    document.head.appendChild(style);
+  })();
+
+  // Per-letter musical preferences. Weights bias the agent toward
+  // foundation first (kick → bass → snare → hat → lead). Steps are 16th
+  // notes; preferred slots reflect classic backbeat / swing positions.
+  // (idx 0 = downbeat 1, idx 4 = beat 2, idx 8 = beat 3, idx 12 = beat 4)
+  const GROOVE_PRIORS = {
+    M: { weight: 5.0, preferred: [0, 8, 4, 12, 6, 14] },           // kick
+    O: { weight: 3.5, preferred: [0, 8, 4, 12, 10, 6, 14, 2] },    // bass
+    A: { weight: 2.5, preferred: [4, 12, 5, 13, 8, 0] },           // snare
+    Y: { weight: 1.6, preferred: [2, 6, 10, 14, 0, 4, 8, 12] },    // hat (offbeats)
+    R: { weight: 1.2, preferred: [0, 8, 6, 14, 4, 12, 10, 2] },    // lead
+  };
+
+  function pickWeightedLetter() {
+    // Bias toward letters that already have notes (build on foundation),
+    // but always leave room for fresh layers.
+    let total = 0;
+    const scores = {};
+    for (const L of SEQ_LETTERS) {
+      const prior = GROOVE_PRIORS[L] || { weight: 1.0, preferred: [] };
+      const filled = seqGrid[L].filter(Boolean).length;
+      // If the row is already dense, drop its weight so we layer elsewhere.
+      const density = filled / SEQ_STEPS;
+      const w = prior.weight * (1 - density * 0.7);
+      scores[L] = Math.max(0.05, w);
+      total += scores[L];
+    }
+    let r = Math.random() * total;
+    for (const L of SEQ_LETTERS) {
+      r -= scores[L];
+      if (r <= 0) return L;
+    }
+    return SEQ_LETTERS[0];
+  }
+
+  function pickStepForLetter(L) {
+    const prior = GROOVE_PRIORS[L] || { preferred: [] };
+    // Try preferred slots first, in order, that are still empty.
+    for (const idx of prior.preferred) {
+      if (!seqGrid[L][idx]) return idx;
+    }
+    // Fallback: any empty slot at random.
+    const empty = [];
+    for (let i = 0; i < SEQ_STEPS; i++) if (!seqGrid[L][i]) empty.push(i);
+    if (empty.length === 0) return -1;
+    return empty[(Math.random() * empty.length) | 0];
+  }
+
+  function evolveStep() {
+    if (!seqEl) return;
+    // Pick a letter, then a step.
+    // Try a few letters in case the first is full.
+    let L = null, idx = -1;
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const candidate = pickWeightedLetter();
+      const slot = pickStepForLetter(candidate);
+      if (slot >= 0) { L = candidate; idx = slot; break; }
+    }
+    if (!L || idx < 0) return;
+    // Set the grid + render with a brief gold ring marking it as agent-added.
+    seqGrid[L][idx] = true;
+    const c = seqEl.querySelector(`.cell[data-letter="${L}"][data-idx="${idx}"]`);
+    if (c) {
+      c.classList.add("on");
+      c.classList.remove("agent-add");
+      // Force reflow so the animation restarts even if reused quickly.
+      void c.offsetWidth;
+      c.classList.add("agent-add");
+      setTimeout(() => { c.classList.remove("agent-add"); }, 1000);
+    }
+    // Optimistic local audio preview (matches the cell click path).
+    if (soundOn && Tone) playStep(L, Tone.now(), 0.55);
+    // Broadcast to peers — same shape as a human toggle.
+    fetch(`${SYNC_BASE}/event`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ type: "step", letter: L, idx, on: true, from: SELF_ID }),
+      keepalive: true,
+    }).catch(() => {});
+  }
+
+  function checkGrooveEvolver() {
+    if (document.hidden) return;
+    if (Date.now() - lastUserInteractionAt <= 30000) return;
+    // Only run when the room is silent — total active cells across all rows.
+    let total = 0;
+    for (const L of SEQ_LETTERS) {
+      for (let i = 0; i < SEQ_STEPS; i++) if (seqGrid[L][i]) total++;
+    }
+    if (total > 0) return;
+    // We made it — propose one note.
+    evolveStep();
+  }
+
+  // 1.2s cadence so the groove builds slowly. At ~33 cells over 40s the
+  // backbeat lands first, mids layer next, leads come last.
+  const grooveInterval = setInterval(checkGrooveEvolver, 1200);
 
   // ── PRESENCE / SYNC via SSE ──
   // Track peer → star index. The server gives presence count, not stable
@@ -1947,6 +2080,7 @@ export function initMotion(gsap) {
     window.removeEventListener("resize", onMagResize);
     if (heartbeatInterval) clearInterval(heartbeatInterval);
     clearInterval(idleInterval);
+    clearInterval(grooveInterval);
     if (nightRaf) cancelAnimationFrame(nightRaf);
     if (fieldHandle) fieldHandle.destroy();
     if (starsHandle) starsHandle.destroy();
@@ -1964,6 +2098,7 @@ export function initMotion(gsap) {
       window.removeEventListener("resize", onMagResize);
       if (heartbeatInterval) clearInterval(heartbeatInterval);
       clearInterval(idleInterval);
+      clearInterval(grooveInterval);
       if (nightRaf) cancelAnimationFrame(nightRaf);
       if (fieldHandle) fieldHandle.destroy();
       if (starsHandle) starsHandle.destroy();
