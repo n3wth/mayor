@@ -3,9 +3,9 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>mayor.wtf</title>
-<meta name="description" content="The Office of The Mayor — a live autonomous-agent inbox.">
-<meta name="theme-color" content="#000000">
+<title>mayor.wtf — office of the mayor</title>
+<meta name="description" content="The Office of the Mayor. A small municipal authority for a town that mostly runs itself.">
+<meta name="theme-color" content="#EFE9DC">
 
 <link rel="icon" type="image/svg+xml" href="/favicon.svg">
 <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png">
@@ -14,261 +14,555 @@
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://mayor.wtf">
 <meta property="og:title" content="mayor.wtf">
-<meta property="og:description" content="The Office of The Mayor.">
+<meta property="og:description" content="Office of the Mayor.">
 <meta property="og:image" content="https://mayor.wtf/og.png">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
 
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="mayor.wtf">
-<meta name="twitter:description" content="The Office of The Mayor.">
+<meta name="twitter:description" content="Office of the Mayor.">
 <meta name="twitter:image" content="https://mayor.wtf/og.png">
 
-<link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
-<link rel="stylesheet" href="/fonts.css">
+<link rel="preconnect" href="https://rsms.me/">
+<link rel="stylesheet" href="https://rsms.me/inter/inter.css">
 <style>
+  /*
+    mayor.wtf — duotone build
+    Two colors, one accent. No gradients. No shadows. No glow.
+    Reference: Teenage Engineering OP-1, Swiss broadside, municipal stationery.
+  */
+
   :root {
-    --y: #f2e437;
-    --y-dim: #6b6418;
-    --k: #0a0a0a;
-    --display: "Display", "Arial Narrow Bold", "Arial Narrow", sans-serif;
-    --mono: "Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
-    --sans: "Sans", ui-sans-serif, system-ui, -apple-system, sans-serif;
+    --paper: #EFE9DC;        /* OP-1 cream */
+    --ink:   #0A0A0A;        /* near-black */
+    --ink-2: #1F1F1F;        /* secondary ink, no opacity tricks */
+    --rule:  #0A0A0A;
+    --accent:#FF5F1F;        /* mayor orange — used only for live state */
+    --mono:  ui-monospace, "JetBrains Mono", "IBM Plex Mono", Menlo, Consolas, monospace;
+    --sans:  "Inter", system-ui, -apple-system, "Helvetica Neue", Arial, sans-serif;
+    --frame: 18px;
+    --gap:   18px;
   }
+  @supports (font-variation-settings: normal) {
+    :root { --sans: "Inter var", system-ui, sans-serif; }
+  }
+
   *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
-  html, body { height: 100%; background: var(--k); color: var(--y); overflow: hidden; }
+
+  html { background: var(--paper); }
   body {
+    background: var(--paper);
+    color: var(--ink);
     font-family: var(--sans);
+    font-feature-settings: "ss01", "ss02", "cv11", "tnum";
     -webkit-font-smoothing: antialiased;
-    cursor: crosshair;
+    text-rendering: optimizeLegibility;
+    line-height: 1.4;
+    min-height: 100vh;
+    padding: var(--frame);
   }
 
-  .stage { position: fixed; inset: 0; overflow: hidden; }
+  /* Outer ledger frame — a hard 1px municipal border. */
+  .ledger {
+    border: 1px solid var(--rule);
+    min-height: calc(100vh - var(--frame) * 2);
+    display: grid;
+    grid-template-rows: auto 1fr auto;
+  }
 
-  /* Shape canvas — each shape is a labeled signal */
-  .shapes { position: absolute; inset: 0; pointer-events: none; }
-  .shapes svg { display: block; width: 100%; height: 100%; overflow: visible; }
-  .shape { will-change: transform, opacity; }
-  .shape-tip {
+  /* ---------- Masthead ---------- */
+  .masthead {
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
+    align-items: center;
+    border-bottom: 1px solid var(--rule);
+    padding: 14px 22px;
     font-family: var(--mono);
-    font-size: 10px;
-    letter-spacing: 2px;
+    font-size: 11px;
+    letter-spacing: 0.12em;
     text-transform: uppercase;
-    fill: var(--y-dim);
-    opacity: 0;
-    pointer-events: none;
-    transition: opacity .4s ease;
   }
-  .shape:hover .shape-tip { opacity: 1; }
+  .masthead .left  { justify-self: start; }
+  .masthead .mid   { justify-self: center; }
+  .masthead .right { justify-self: end; display: flex; gap: 22px; }
+  .masthead a { color: var(--ink); text-decoration: none; border-bottom: 1px solid transparent; }
+  .masthead a:hover { border-bottom-color: var(--ink); }
+  .pulse {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .pulse-dot {
+    width: 8px;
+    height: 8px;
+    background: var(--accent);
+    /* No glow. No shadow. Just a square. */
+  }
+  .pulse-dot.off { background: var(--ink); }
+  .pulse-dot.blink { animation: hardblink 1.6s steps(2, end) infinite; }
+  @keyframes hardblink {
+    0%, 49.999% { opacity: 1; }
+    50%, 100%   { opacity: 0; }
+  }
 
-  /* MAYOR */
-  .mayor-wrap {
-    position: absolute;
-    inset: 0;
+  /* ---------- Hero ---------- */
+  .hero {
+    padding: clamp(28px, 6vw, 64px) clamp(22px, 4vw, 48px);
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: clamp(24px, 4vw, 40px);
+    border-bottom: 1px solid var(--rule);
+  }
+
+  .word {
+    font-family: var(--sans);
+    font-weight: 900;
+    font-size: clamp(72px, 19vw, 280px);
+    line-height: 0.82;
+    letter-spacing: -0.055em;
+    color: var(--ink);
+    user-select: none;
+    text-transform: lowercase;
+  }
+  .word .dot {
+    display: inline-block;
+    width: 0.18em;
+    height: 0.18em;
+    background: var(--accent);
+    margin-left: 0.08em;
+    margin-bottom: 0.08em;
+    vertical-align: baseline;
+  }
+
+  .charter {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: var(--gap);
+  }
+  .charter > div {
+    border-top: 1px solid var(--rule);
+    padding-top: 14px;
+    font-size: 14px;
+    line-height: 1.5;
+    color: var(--ink-2);
+  }
+  .charter > div b {
+    display: block;
+    font-family: var(--mono);
+    font-size: 10.5px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--ink);
+    font-weight: 600;
+    margin-bottom: 8px;
+  }
+  @media (max-width: 760px) {
+    .charter { grid-template-columns: 1fr; }
+  }
+
+  /* ---------- Operating panel ---------- */
+  .panel {
+    display: grid;
+    grid-template-columns: 1.2fr 1fr;
+    border-bottom: 1px solid var(--rule);
+  }
+  .panel > section {
+    padding: clamp(20px, 3vw, 32px);
+  }
+  .panel .left  { border-right: 1px solid var(--rule); }
+  @media (max-width: 760px) {
+    .panel { grid-template-columns: 1fr; }
+    .panel .left { border-right: 0; border-bottom: 1px solid var(--rule); }
+  }
+
+  .h-rule {
+    font-family: var(--mono);
+    font-size: 10.5px;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    color: var(--ink);
+    border-bottom: 1px solid var(--rule);
+    padding-bottom: 10px;
+    margin-bottom: 14px;
+    display: flex;
+    justify-content: space-between;
+  }
+  .h-rule .meta {
+    color: var(--ink-2);
+    font-weight: 400;
+    letter-spacing: 0.18em;
+  }
+
+  /* Hardware-row: TE-style flat indicator strip, NOT glowing */
+  .strip {
+    display: grid;
+    grid-template-columns: repeat(24, 1fr);
+    gap: 4px;
+    margin-bottom: 18px;
+  }
+  .strip .cell {
+    height: 22px;
+    border: 1px solid var(--rule);
+    background: var(--paper);
+  }
+  .strip .cell.on   { background: var(--ink); }
+  .strip .cell.hot  { background: var(--accent); border-color: var(--accent); }
+
+  /* Vital readouts as flat key/value rows */
+  .readout {
+    font-family: var(--mono);
+    font-size: 13px;
+  }
+  .readout .row {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    align-items: baseline;
+    padding: 6px 0;
+    border-bottom: 1px dashed rgba(10,10,10,0.3);
+  }
+  .readout .row:last-child { border-bottom: 0; }
+  .readout .k {
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--ink-2);
+  }
+  .readout .v {
+    font-variant-numeric: tabular-nums;
+    font-weight: 600;
+    color: var(--ink);
+  }
+  .readout .v.hot { color: var(--accent); }
+
+  /* Chronicle list — recent municipal activity, no animation, no glow */
+  .chron {
+    list-style: none;
+    font-family: var(--mono);
+    font-size: 12px;
+    line-height: 1.55;
+  }
+  .chron li {
+    display: grid;
+    grid-template-columns: 64px 1fr;
+    gap: 14px;
+    padding: 8px 0;
+    border-bottom: 1px dashed rgba(10,10,10,0.3);
+  }
+  .chron li:last-child { border-bottom: 0; }
+  .chron .ts {
+    color: var(--ink-2);
+    letter-spacing: 0.06em;
+    font-variant-numeric: tabular-nums;
+  }
+  .chron .ev { color: var(--ink); }
+  .chron .ev .tag {
+    display: inline-block;
+    padding: 1px 6px;
+    margin-right: 6px;
+    background: var(--ink);
+    color: var(--paper);
+    font-size: 10.5px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+  }
+  .chron .ev .tag.acc { background: var(--accent); color: var(--paper); }
+
+  /* ---------- Contact bar ---------- */
+  .contact {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    align-items: stretch;
+    border-bottom: 1px solid var(--rule);
+  }
+  .contact .blurb {
+    padding: clamp(20px, 3vw, 32px);
+    font-size: 15px;
+    line-height: 1.5;
+    color: var(--ink-2);
+    border-right: 1px solid var(--rule);
+  }
+  .contact .blurb b { color: var(--ink); }
+  .contact a.send {
+    align-self: stretch;
     display: flex;
     align-items: center;
-    justify-content: center;
-    pointer-events: none;
-  }
-  .mayor-wrap svg {
-    width: 92%;
-    height: auto;
-    max-height: 70vh;
-    overflow: visible;
-  }
-  .mayor-wrap svg text {
-    font-family: var(--display);
-    font-weight: 900;
-    fill: var(--y);
-  }
-
-  /* HUD */
-  .hud {
-    position: absolute;
-    inset: 0;
-    pointer-events: none;
-    z-index: 10;
-  }
-  .hud .panel {
-    position: absolute;
-    font-family: var(--mono);
-    font-size: clamp(10px, 1.1vw, 12px);
-    letter-spacing: 2px;
-    text-transform: uppercase;
-    color: var(--y);
-    opacity: 0.85;
-    line-height: 1.7;
-  }
-  .hud .panel .row { display: flex; justify-content: space-between; gap: 16px; min-width: 180px; }
-  .hud .panel .row .v { color: var(--y); font-variant-numeric: tabular-nums; }
-  .hud .panel .row .k { color: var(--y-dim); }
-
-  .hud .tl { top: clamp(20px, 4vw, 36px); left: clamp(20px, 4vw, 36px); }
-  .hud .tr { top: clamp(20px, 4vw, 36px); right: clamp(20px, 4vw, 36px); text-align: right; }
-  .hud .bl { bottom: clamp(20px, 4vw, 36px); left: clamp(20px, 4vw, 36px); }
-  .hud .br { bottom: clamp(20px, 4vw, 36px); right: clamp(20px, 4vw, 36px); text-align: right; pointer-events: auto; }
-
-  .hud a { color: var(--y); text-decoration: none; pointer-events: auto; opacity: 0.85; transition: opacity .25s ease; }
-  .hud a:hover { opacity: 1; text-decoration: underline; text-underline-offset: 4px; }
-
-  .hb { display: inline-block; width: 8px; height: 8px; background: var(--y); border-radius: 50%; margin-right: 8px; vertical-align: middle; }
-  .hb.offline { background: #c14b3a; }
-
-  /* The "send mail" CTA. Real hover affordance. */
-  .cta {
-    position: absolute;
-    left: 50%;
-    bottom: clamp(60px, 9vh, 110px);
-    transform: translateX(-50%);
-    pointer-events: auto;
-    font-family: var(--mono);
-    font-size: clamp(11px, 1.2vw, 13px);
-    letter-spacing: 3px;
-    text-transform: uppercase;
-    color: var(--y);
+    gap: 14px;
+    padding: 0 clamp(22px, 3vw, 36px);
+    background: var(--ink);
+    color: var(--paper);
     text-decoration: none;
-    border: 1.5px solid var(--y);
-    padding: clamp(10px, 1.4vw, 14px) clamp(20px, 2.4vw, 28px);
-    transition: background .2s ease, color .2s ease;
-    z-index: 11;
+    font-family: var(--mono);
+    font-size: 14px;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    transition: background 80ms steps(1, end);
   }
-  .cta:hover { background: var(--y); color: var(--k); }
-  .cta .arrow { display: inline-block; margin-left: 10px; transition: transform .2s ease; }
-  .cta:hover .arrow { transform: translateX(4px); }
+  .contact a.send:hover { background: var(--accent); }
+  .contact a.send .arrow {
+    display: inline-block;
+    width: 18px;
+    height: 1px;
+    background: currentColor;
+    position: relative;
+  }
+  .contact a.send .arrow::after {
+    content: "";
+    position: absolute;
+    right: 0;
+    top: -3px;
+    width: 6px;
+    height: 6px;
+    border-right: 1px solid currentColor;
+    border-top: 1px solid currentColor;
+    transform: rotate(45deg);
+  }
+  @media (max-width: 760px) {
+    .contact { grid-template-columns: 1fr; }
+    .contact .blurb { border-right: 0; border-bottom: 1px solid var(--rule); }
+    .contact a.send { padding: 18px 22px; }
+  }
 
+  /* ---------- Footer ledger ---------- */
+  .foot {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    padding: 12px 22px;
+    font-family: var(--mono);
+    font-size: 10.5px;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--ink-2);
+  }
+  .foot .right { justify-self: end; }
+  .foot a { color: var(--ink-2); text-decoration: none; }
+  .foot a:hover { color: var(--ink); border-bottom: 1px solid var(--ink); }
+
+  /* ---------- Selection ---------- */
+  ::selection { background: var(--accent); color: var(--paper); }
+
+  /* ---------- Reduced motion ---------- */
   @media (prefers-reduced-motion: reduce) {
-    * { animation: none !important; transition: none !important; }
+    *, *::before, *::after { animation: none !important; transition: none !important; }
   }
 </style>
 </head>
 <body>
 
-<div class="stage">
+<main class="ledger" id="ledger">
 
-  <!-- Shape signals.
-       data-signal: which live metric drives this shape's pulse.
-       data-tip: tiny label shown on hover. -->
-  <div class="shapes" aria-hidden="true">
-    <svg viewBox="0 0 1600 1000" preserveAspectRatio="xMidYMid slice">
-      <!-- Top band: citizens & infrastructure -->
-      <g class="shape" data-signal="citizen" data-shape-id="c0">
-        <circle cx="220" cy="180" r="60" fill="var(--y)"/>
-        <text class="shape-tip" x="220" y="270" text-anchor="middle">citizen 1</text>
-      </g>
-      <g class="shape" data-signal="citizen" data-shape-id="c1">
-        <circle cx="1380" cy="220" r="50" fill="var(--y)"/>
-        <text class="shape-tip" x="1380" y="295" text-anchor="middle">citizen 2</text>
-      </g>
-      <g class="shape" data-signal="citizen" data-shape-id="c2">
-        <circle cx="800" cy="160" r="40" fill="var(--y)"/>
-        <text class="shape-tip" x="800" y="225" text-anchor="middle">citizen 3</text>
-      </g>
-      <g class="shape" data-signal="citizen-slot" data-shape-id="c3">
-        <circle cx="500" cy="120" r="14" fill="var(--y)" opacity="0.25"/>
-      </g>
-      <g class="shape" data-signal="citizen-slot" data-shape-id="c4">
-        <circle cx="1100" cy="120" r="14" fill="var(--y)" opacity="0.25"/>
-      </g>
-
-      <!-- Side rails: sessions today (length scales with count) -->
-      <g class="shape" data-signal="session-today" data-shape-id="st">
-        <rect x="80" y="780" width="180" height="14" fill="var(--y)"/>
-        <text class="shape-tip" x="170" y="810" text-anchor="middle">sessions today</text>
-      </g>
-      <g class="shape" data-signal="session-hour" data-shape-id="sh">
-        <rect x="1340" y="820" width="180" height="14" fill="var(--y)"/>
-        <text class="shape-tip" x="1430" y="850" text-anchor="middle">sessions / hr</text>
-      </g>
-
-      <!-- Active triangle: rotates while a session is active -->
-      <g class="shape" data-signal="active" data-shape-id="t">
-        <polygon points="800,80 836,144 764,144" fill="var(--y)"/>
-        <text class="shape-tip" x="800" y="170" text-anchor="middle">thinking</text>
-      </g>
-
-      <!-- Recent activity: small dots fade in/out with pulse -->
-      <g class="shape" data-signal="pulse" data-shape-id="p1">
-        <circle cx="120" cy="500" r="14" fill="var(--y)"/>
-      </g>
-      <g class="shape" data-signal="pulse" data-shape-id="p2">
-        <circle cx="1480" cy="540" r="14" fill="var(--y)"/>
-      </g>
-      <g class="shape" data-signal="pulse" data-shape-id="p3">
-        <circle cx="1430" cy="430" r="6" fill="var(--y)"/>
-      </g>
-      <g class="shape" data-signal="pulse" data-shape-id="p4">
-        <circle cx="170" cy="430" r="6" fill="var(--y)"/>
-      </g>
-
-      <!-- Last-email indicator -->
-      <g class="shape" data-signal="last-email" data-shape-id="le">
-        <rect x="780" y="900" width="40" height="40" fill="var(--y)"/>
-        <text class="shape-tip" x="800" y="970" text-anchor="middle">last received</text>
-      </g>
-
-      <!-- Decorative anchors (also drift) -->
-      <g class="shape" data-signal="decor" data-shape-id="d1">
-        <rect x="1430" y="430" width="100" height="2" fill="var(--y)"/>
-      </g>
-      <g class="shape" data-signal="decor" data-shape-id="d2">
-        <rect x="70" y="430" width="100" height="2" fill="var(--y)"/>
-      </g>
-      <g class="shape" data-signal="decor" data-shape-id="d3">
-        <polygon points="200,920 230,920 215,940" fill="var(--y)"/>
-      </g>
-      <g class="shape" data-signal="decor" data-shape-id="d4">
-        <polygon points="1380,920 1410,920 1395,940" fill="var(--y)"/>
-      </g>
-    </svg>
-  </div>
-
-  <!-- MAYOR -->
-  <h1 class="mayor-wrap" aria-label="Mayor">
-    <svg viewBox="-40 -40 1080 400"
-         role="img" aria-hidden="true"
-         preserveAspectRatio="xMidYMid meet">
-      <g font-size="340" text-anchor="middle">
-        <text class="l" x="165" y="270">M</text>
-        <text class="l" x="358" y="270">A</text>
-        <text class="l" x="525" y="270">Y</text>
-        <text class="l" x="695" y="270">O</text>
-        <text class="l" x="865" y="270">R</text>
-      </g>
-    </svg>
-  </h1>
-
-  <!-- CTA -->
-  <a class="cta" href="mailto:um@mayor.wtf?subject=Mayor%2C%20I%20have%20a%20question">
-    Email&nbsp;<span data-text="addr">um@mayor.wtf</span><span class="arrow">→</span>
-  </a>
-
-  <!-- HUD -->
-  <div class="hud">
-    <div class="panel tl">
-      <div class="row"><span class="k">domain</span><span class="v">mayor.wtf</span></div>
-      <div class="row"><span class="k">status</span><span class="v"><span class="hb" data-hb></span><span data-status>online</span></span></div>
+  <!-- ============== MASTHEAD ============== -->
+  <header class="masthead">
+    <div class="left pulse" id="pulse" aria-live="polite">
+      <span class="pulse-dot off" id="pulse-dot"></span>
+      <span id="pulse-label">connecting · town</span>
     </div>
-    <div class="panel tr">
-      <div class="row"><span class="k">citizens</span><span class="v" data-stat="citizens">·</span></div>
-      <div class="row"><span class="k">sessions today</span><span class="v" data-stat="sessions_today">·</span></div>
-      <div class="row"><span class="k">last received</span><span class="v" data-stat="last_email_age">—</span></div>
-    </div>
-    <div class="panel bl">
-      <div class="row"><span class="k">held by</span><span class="v">Oliver Newth</span></div>
-      <div class="row"><span class="k">at</span><span class="v">Google · SF</span></div>
-    </div>
-    <div class="panel br">
-      <div class="row"><span class="v"><a href="https://n3wth.com">n3wth.com ↗</a></span></div>
-    </div>
-  </div>
+    <div class="mid">Office of the Mayor</div>
+    <nav class="right">
+      <a href="mailto:um@mayor.wtf">um@mayor.wtf</a>
+      <a href="https://n3wth.com" rel="me">n3wth.com</a>
+    </nav>
+  </header>
 
-</div>
+  <!-- ============== HERO ============== -->
+  <section class="hero">
+    <div class="word" aria-label="mayor">mayor<span class="dot" aria-hidden="true"></span></div>
 
-<script src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/gsap.min.js" defer></script>
-<script type="module">
-  import { initMotion } from "/motion.js";
-  const ready = () => (window.gsap ? initMotion(window.gsap) : requestAnimationFrame(ready));
-  ready();
+    <div class="charter">
+      <div>
+        <b>01 — Charter</b>
+        A small municipal authority for a town that mostly runs itself. Coordinates work, files paper, signs off on merges, answers the door.
+      </div>
+      <div>
+        <b>02 — Constitution</b>
+        Evidence over assumptions. Code over docs. One thing at a time. The town log is the source of truth.
+      </div>
+      <div>
+        <b>03 — Office hours</b>
+        Always open. Emails answered in the order they arrive. Urgent matters routed to the witness on duty.
+      </div>
+    </div>
+  </section>
+
+  <!-- ============== OPERATING PANEL ============== -->
+  <section class="panel">
+
+    <section class="left">
+      <div class="h-rule">
+        <span>Town pulse</span>
+        <span class="meta" id="pulse-meta">last 60 minutes</span>
+      </div>
+
+      <!-- Activity strip: 24 cells, one per recent slot. Flat blocks. -->
+      <div class="strip" id="strip" aria-hidden="true"></div>
+
+      <div class="readout" id="readout">
+        <div class="row"><span class="k">Citizens</span><span class="v" id="r-citizens">—</span></div>
+        <div class="row"><span class="k">Sessions today</span><span class="v" id="r-sessions">—</span></div>
+        <div class="row"><span class="k">Sessions this hour</span><span class="v" id="r-hour">—</span></div>
+        <div class="row"><span class="k">Active right now</span><span class="v" id="r-active">—</span></div>
+        <div class="row"><span class="k">Last mail received</span><span class="v" id="r-mail">—</span></div>
+      </div>
+    </section>
+
+    <section class="right">
+      <div class="h-rule">
+        <span>Recent business</span>
+        <span class="meta" id="chron-meta">municipal log</span>
+      </div>
+      <ul class="chron" id="chron">
+        <li><span class="ts">— · — —</span><span class="ev"><span class="tag">boot</span>Loading the ledger.</span></li>
+      </ul>
+    </section>
+
+  </section>
+
+  <!-- ============== CONTACT ============== -->
+  <section class="contact">
+    <div class="blurb">
+      For polite inquiries, rude inquiries, scope questions, or job offers for the Mayor, write to <b>um@mayor.wtf</b>. The Mayor reads everything. Reply times vary by mood and queue depth.
+    </div>
+    <a class="send" href="mailto:um@mayor.wtf">
+      <span>Write the Mayor</span>
+      <span class="arrow" aria-hidden="true"></span>
+    </a>
+  </section>
+
+  <!-- ============== FOOT ============== -->
+  <footer class="foot">
+    <div class="left">mayor.wtf · est. 2026 · hand-built</div>
+    <div class="right"><a href="https://github.com/n3wth/mayor">source</a></div>
+  </footer>
+
+</main>
+
+<script>
+  // -----------------------------------------------------------------------
+  // Live town signal — reads /api/stats every 8s. No animation, just numbers.
+  // -----------------------------------------------------------------------
+
+  const $  = (sel) => document.querySelector(sel);
+  const els = {
+    pulseDot:    $("#pulse-dot"),
+    pulseLabel:  $("#pulse-label"),
+    pulseMeta:   $("#pulse-meta"),
+    strip:       $("#strip"),
+    citizens:    $("#r-citizens"),
+    sessions:    $("#r-sessions"),
+    hour:        $("#r-hour"),
+    active:      $("#r-active"),
+    mail:        $("#r-mail"),
+    chron:       $("#chron"),
+  };
+
+  // Build the 24-cell activity strip once.
+  const STRIP_CELLS = 24;
+  const cells = [];
+  for (let i = 0; i < STRIP_CELLS; i++) {
+    const el = document.createElement("div");
+    el.className = "cell";
+    els.strip.appendChild(el);
+    cells.push(el);
+  }
+
+  function fmtAge(seconds) {
+    if (seconds == null || !Number.isFinite(seconds)) return "—";
+    if (seconds < 60)         return `${Math.round(seconds)}s ago`;
+    if (seconds < 60 * 60)    return `${Math.round(seconds / 60)}m ago`;
+    if (seconds < 60 * 60 * 24) return `${Math.round(seconds / 3600)}h ago`;
+    return `${Math.round(seconds / 86400)}d ago`;
+  }
+
+  // Map recent_pulse (0..N) onto the 24-cell strip. Newest on the right.
+  function paintStrip(pulse, hot) {
+    const n = Math.max(0, Math.min(STRIP_CELLS, Math.round(pulse || 0)));
+    for (let i = 0; i < STRIP_CELLS; i++) {
+      cells[i].classList.remove("on", "hot");
+      if (i >= STRIP_CELLS - n) {
+        cells[i].classList.add(i === STRIP_CELLS - 1 && hot ? "hot" : "on");
+      }
+    }
+  }
+
+  function paintChron(items) {
+    if (!items || !items.length) return;
+    els.chron.innerHTML = items.map(it => {
+      const klass = it.kind === "merge" || it.kind === "ship" ? "tag acc" : "tag";
+      const tag   = (it.kind || "log").slice(0, 6);
+      const ts    = it.ts || "—";
+      const ev    = it.ev || "";
+      return `<li><span class="ts">${ts}</span><span class="ev"><span class="${klass}">${tag}</span>${ev}</span></li>`;
+    }).join("");
+  }
+
+  // Synthesize a chronicle from the stats payload. The /api/stats endpoint
+  // doesn't return per-event details (by design — no PII), so we render
+  // the aggregates as municipal-log entries.
+  function chronFromStats(s) {
+    const out = [];
+    const now = new Date();
+    const hh  = String(now.getHours()).padStart(2, "0");
+    const mm  = String(now.getMinutes()).padStart(2, "0");
+    const stamp = `${hh}:${mm}`;
+
+    if (s.online === false || s.stale) {
+      out.push({ ts: stamp, kind: "halt",  ev: "Town hall offline. Records cached." });
+    }
+    if (s.sessions_this_hour > 0) {
+      out.push({ ts: stamp, kind: "work",  ev: `${s.sessions_this_hour} session${s.sessions_this_hour === 1 ? "" : "s"} opened this hour.` });
+    }
+    if (s.active_sessions > 0) {
+      out.push({ ts: stamp, kind: "live",  ev: `${s.active_sessions} polecat${s.active_sessions === 1 ? "" : "s"} on the floor right now.` });
+    }
+    if (s.last_email_age_seconds != null) {
+      out.push({ ts: stamp, kind: "mail",  ev: `Last citizen mail received ${fmtAge(s.last_email_age_seconds)}.` });
+    }
+    if (s.sessions_today > 0) {
+      out.push({ ts: stamp, kind: "log",   ev: `${s.sessions_today} session${s.sessions_today === 1 ? "" : "s"} on the books today.` });
+    }
+    if (s.citizens > 0) {
+      out.push({ ts: stamp, kind: "ship",  ev: `${s.citizens} citizen${s.citizens === 1 ? "" : "s"} on the rolls.` });
+    }
+    if (out.length === 0) {
+      out.push({ ts: stamp, kind: "quiet", ev: "Quiet morning. Mayor at the desk." });
+    }
+    return out;
+  }
+
+  let lastOnline = null;
+
+  async function tick() {
+    try {
+      const r = await fetch("/api/stats", { cache: "no-store" });
+      if (!r.ok) throw new Error(`stats ${r.status}`);
+      const s = await r.json();
+
+      const online = s.online !== false && !s.stale;
+      els.pulseDot.classList.toggle("off",   !online);
+      els.pulseDot.classList.toggle("blink",  online && (s.active_sessions || 0) > 0);
+      els.pulseLabel.textContent = online
+        ? (s.active_sessions > 0 ? `live · ${s.active_sessions} on the floor` : "open · town quiet")
+        : "offline · serving cache";
+
+      els.citizens.textContent = (s.citizens ?? "—").toString();
+      els.sessions.textContent = (s.sessions_today ?? "—").toString();
+      els.hour.textContent     = (s.sessions_this_hour ?? "—").toString();
+      els.active.textContent   = (s.active_sessions ?? "—").toString();
+      if (s.active_sessions > 0) els.active.classList.add("hot"); else els.active.classList.remove("hot");
+      els.mail.textContent     = fmtAge(s.last_email_age_seconds);
+
+      paintStrip(s.recent_pulse ?? 0, (s.active_sessions || 0) > 0);
+      paintChron(chronFromStats(s));
+
+      lastOnline = online;
+    } catch (e) {
+      els.pulseDot.classList.add("off");
+      els.pulseDot.classList.remove("blink");
+      els.pulseLabel.textContent = "offline · serving cache";
+    }
+  }
+
+  tick();
+  setInterval(tick, 8000);
 </script>
 
 </body>
