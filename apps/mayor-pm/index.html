@@ -4,8 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Oliver Newth — mayor.wtf</title>
-<meta name="description" content="Oliver Newth. Product Manager at Google, San Francisco.">
-<meta name="theme-color" content="#f2e437">
+<meta name="description" content="mayor.wtf — Oliver Newth.">
+<meta name="theme-color" content="#000000">
 
 <link rel="icon" type="image/svg+xml" href="/favicon.svg">
 <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png">
@@ -13,129 +13,104 @@
 
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://mayor.wtf">
-<meta property="og:title" content="Oliver Newth — mayor.wtf">
-<meta property="og:description" content="Product Manager at Google, San Francisco.">
+<meta property="og:title" content="mayor.wtf">
+<meta property="og:description" content="The Office of The Mayor.">
 <meta property="og:image" content="https://mayor.wtf/og.png">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
 
 <meta name="twitter:card" content="summary_large_image">
-<meta name="twitter:title" content="Oliver Newth — mayor.wtf">
-<meta name="twitter:description" content="Product Manager at Google, San Francisco.">
+<meta name="twitter:title" content="mayor.wtf">
+<meta name="twitter:description" content="The Office of The Mayor.">
 <meta name="twitter:image" content="https://mayor.wtf/og.png">
 
 <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
 <link rel="stylesheet" href="/fonts.css">
 <style>
   :root {
-    --bg: #f2e437;
-    --ink: #0a0a0a;
-    --dim: #4a4418;
-    --pad: clamp(20px, 4vw, 56px);
+    --y: #f2e437;
+    --k: #0a0a0a;
+    --display: "Display", "Arial Narrow Bold", "Arial Narrow", sans-serif;
     --mono: "Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
     --sans: "Sans", ui-sans-serif, system-ui, -apple-system, sans-serif;
-    --display: "Display", "Arial Narrow", sans-serif;
-    --gap-page: clamp(16px, 2vh, 32px);
   }
-
   *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
-  html, body { height: 100%; background: var(--bg); color: var(--ink); }
-
+  html, body { height: 100%; background: var(--k); color: var(--y); overflow: hidden; }
   body {
     font-family: var(--sans);
     -webkit-font-smoothing: antialiased;
-    padding: var(--pad);
-    display: grid;
-    grid-template-rows: 1fr auto;
-    height: 100svh;
-    min-height: 520px;
-    gap: var(--gap-page);
+    cursor: crosshair;
+  }
+
+  /* Stage holds everything. Three z-layers: shapes (bg), MAYOR (mid), HUD (front). */
+  .stage {
+    position: fixed;
+    inset: 0;
     overflow: hidden;
   }
-  /* Short viewports: allow scroll rather than squishing. */
-  @media (max-height: 520px) {
-    body { height: auto; min-height: 100vh; overflow: visible; }
-  }
 
-  a {
-    color: inherit;
-    text-decoration: none;
+  /* The shape canvas — yellow geometric primitives that pulse and drift. */
+  .shapes {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
   }
-  a:focus-visible {
-    outline: 2px solid var(--ink);
-    outline-offset: 3px;
-  }
+  .shapes svg { display: block; width: 100%; height: 100%; overflow: visible; }
+  .shape { will-change: transform, opacity; }
 
-  .label {
-    font-family: var(--mono);
-    font-size: clamp(10px, 1.1vw, 13px);
-    letter-spacing: 2px;
-    text-transform: uppercase;
-  }
-
-  main {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    min-height: 0;
-    overflow: visible;
-  }
-
+  /* The MAYOR word, centered. */
   .mayor-wrap {
+    position: absolute;
+    inset: 0;
     display: flex;
     align-items: center;
     justify-content: center;
-    width: 100%;
-    height: 100%;
-    overflow: visible;
+    pointer-events: none;
   }
   .mayor-wrap svg {
-    display: block;
-    width: 100%;
+    width: 92%;
     height: auto;
-    max-height: 100%;
+    max-height: 70vh;
     overflow: visible;
   }
   .mayor-wrap svg text {
     font-family: var(--display);
     font-weight: 900;
-    fill: var(--ink);
+    fill: var(--y);
   }
 
-  .foot {
-    display: flex;
-    flex-wrap: wrap;
-    gap: clamp(16px, 3vw, 40px);
-    align-items: end;
-    justify-content: space-between;
+  /* HUD — the only chrome. Top corner labels. */
+  .hud {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    z-index: 10;
+  }
+  .hud .label {
+    position: absolute;
+    font-family: var(--mono);
+    font-size: clamp(10px, 1.1vw, 12px);
+    letter-spacing: 3px;
+    text-transform: uppercase;
+    color: var(--y);
+    opacity: 0.7;
+  }
+  .hud .tl { top: clamp(20px, 4vw, 40px); left: clamp(20px, 4vw, 40px); }
+  .hud .tr { top: clamp(20px, 4vw, 40px); right: clamp(20px, 4vw, 40px); }
+  .hud .bl { bottom: clamp(20px, 4vw, 40px); left: clamp(20px, 4vw, 40px); }
+  .hud .br { bottom: clamp(20px, 4vw, 40px); right: clamp(20px, 4vw, 40px); pointer-events: auto; }
+  .hud a { color: var(--y); text-decoration: none; pointer-events: auto; opacity: 0.7; transition: opacity .2s; }
+  .hud a:hover { opacity: 1; }
+
+  .hud .hb {
+    display: inline-block;
+    width: 8px; height: 8px;
+    background: var(--y);
+    border-radius: 50%;
+    margin-right: 8px;
+    vertical-align: middle;
   }
 
-  .name {
-    font-family: var(--sans);
-    font-weight: 600;
-    font-size: clamp(16px, 1.5vw, 20px);
-    line-height: 1.3;
-  }
-
-  nav {
-    display: flex;
-    flex-wrap: wrap;
-    gap: clamp(14px, 1.8vw, 24px);
-    font-family: var(--sans);
-    font-weight: 600;
-    font-size: clamp(16px, 1.5vw, 20px);
-    line-height: 1.3;
-  }
-  nav a {
-    transition: color 160ms ease;
-  }
-  nav a:hover { color: var(--dim); }
-
-  @media (max-width: 600px) {
-    .foot { flex-direction: column; align-items: flex-start; gap: 20px; }
-  }
-
-  /* Reduced-motion users see the final state immediately, no JS motion runs. */
   @media (prefers-reduced-motion: reduce) {
     * { animation: none !important; transition: none !important; }
   }
@@ -143,11 +118,34 @@
 </head>
 <body>
 
-<main>
+<div class="stage">
+
+  <!-- Shape layer -->
+  <div class="shapes" aria-hidden="true">
+    <svg viewBox="0 0 1600 1000" preserveAspectRatio="xMidYMid slice">
+      <!-- Yellow shapes that animate. Sized in viewBox units. -->
+      <g class="shape s1"><circle cx="220" cy="180" r="60" fill="var(--y)"/></g>
+      <g class="shape s2"><circle cx="1380" cy="220" r="90" fill="var(--y)"/></g>
+      <g class="shape s3"><rect x="80" y="780" width="180" height="14" fill="var(--y)"/></g>
+      <g class="shape s4"><rect x="1300" y="820" width="220" height="14" fill="var(--y)"/></g>
+      <g class="shape s5"><polygon points="800,80 830,140 770,140" fill="var(--y)"/></g>
+      <g class="shape s6"><circle cx="120" cy="500" r="14" fill="var(--y)"/></g>
+      <g class="shape s7"><circle cx="1480" cy="540" r="14" fill="var(--y)"/></g>
+      <g class="shape s8"><rect x="780" y="900" width="40" height="40" fill="var(--y)"/></g>
+      <g class="shape s9"><circle cx="400" cy="900" r="6" fill="var(--y)"/></g>
+      <g class="shape s10"><circle cx="1200" cy="900" r="6" fill="var(--y)"/></g>
+      <g class="shape s11"><rect x="1430" y="430" width="100" height="2" fill="var(--y)"/></g>
+      <g class="shape s12"><rect x="70" y="430" width="100" height="2" fill="var(--y)"/></g>
+      <g class="shape s13"><circle cx="800" cy="940" r="3" fill="var(--y)"/></g>
+      <g class="shape s14"><polygon points="200,920 230,920 215,940" fill="var(--y)"/></g>
+      <g class="shape s15"><polygon points="1380,920 1410,920 1395,940" fill="var(--y)"/></g>
+    </svg>
+  </div>
+
+  <!-- MAYOR -->
   <h1 class="mayor-wrap" aria-label="Mayor">
     <svg viewBox="-40 -40 1080 400"
-         role="img"
-         aria-hidden="true"
+         role="img" aria-hidden="true"
          preserveAspectRatio="xMidYMid meet">
       <g font-size="340" text-anchor="middle">
         <text class="l" x="165" y="270">M</text>
@@ -158,21 +156,22 @@
       </g>
     </svg>
   </h1>
-</main>
 
-<div class="foot">
-  <p class="name">A project by Oliver Newth</p>
-  <nav aria-label="Elsewhere">
-    <a href="https://n3wth.com">n3wth.com</a>
-    <a href="https://github.com/n3wth">GitHub</a>
-    <a href="https://linkedin.com/in/newth">LinkedIn</a>
-  </nav>
+  <!-- HUD -->
+  <div class="hud">
+    <div class="label tl">mayor.wtf</div>
+    <div class="label tr"><span class="hb" aria-hidden="true"></span>online</div>
+    <div class="label bl">Oliver Newth · Google · SF</div>
+    <div class="label br">
+      <a href="https://n3wth.com">n3wth.com ↗</a>
+    </div>
+  </div>
+
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/gsap.min.js" defer></script>
 <script type="module">
   import { initMotion } from "/motion.js";
-  // gsap.min.js is deferred; wait for it on next tick.
   const ready = () => (window.gsap ? initMotion(window.gsap) : requestAnimationFrame(ready));
   ready();
 </script>

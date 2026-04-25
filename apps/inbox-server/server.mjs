@@ -57,9 +57,25 @@ function writeInboundFile(payload) {
 function invokeMayorRespond(jsonPath) {
   // Fire and forget. mayor-respond handles its own logging.
   // Detach so the reply doesn't block the webhook response.
+  //
+  // launchd gives us a minimal PATH; mayor-respond needs jq, node, npx,
+  // and the Claude CLI, all in user-local / Homebrew paths. Inject a full
+  // PATH so the script's subcommands actually resolve.
+  const PATH = [
+    "/opt/homebrew/bin",
+    "/opt/homebrew/sbin",
+    `${HOME}/.local/bin`,
+    `${HOME}/.npm-global/bin`,
+    "/usr/local/bin",
+    "/usr/bin",
+    "/bin",
+    "/usr/sbin",
+    "/sbin",
+  ].join(":");
+
   const child = spawn(MAYOR_RESPOND, [jsonPath], {
     cwd: GT,
-    env: { ...process.env, HOME },
+    env: { ...process.env, HOME, PATH },
     stdio: "ignore",
     detached: true,
   });

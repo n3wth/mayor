@@ -1,97 +1,189 @@
-// Mayor motion system.
+// Mayor motion system — yellow + black, abstract, GSAP-driven.
 //
-// Design intent:
-// - One signature motion system. Eased, continuous, never snappy.
-// - Entrance is a single gesture; idle is ambient; tab-return is a subtle greet.
-// - Honors prefers-reduced-motion: if reduced, the DOM is already in its
-//   final visible state and this module is a no-op.
-// - Pauses idle loops when the tab is hidden (no wasted CPU) and resumes
-//   from the same phase — nothing jumps.
+// Layers (back to front):
+//   1. Shape canvas — geometric primitives drift, scale, rotate
+//   2. MAYOR letters — entrance, ambient idle, react to cursor
+//   3. HUD heartbeat — pulses
+//
+// Motion philosophy:
+//   - Eased, continuous, never snappy
+//   - Cursor is gravity; shapes lean toward it, away from it, in waves
+//   - On click anywhere: "shockwave" — shapes briefly scale + rotate
+//   - On scroll: parallax-ish bias on shape layer
 
 const reduceMotion = () =>
   window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
-// Motion tokens. Change here, change everywhere.
-const TOKEN = {
-  entrance: { duration: 1.1, stagger: 0.07, ease: "power3.out", fromY: 30 },
-  // Tab-return greet is deliberately small — a blink, not a wave.
-  greet:    { lift: -2, up: 0.7, down: 1.4, stagger: 0.08 },
-  idleTravelMax: 3, // max % travel for any idle motion
-};
-
-// Per-letter idle "character" — all sine-eased, continuous, out of phase.
-// Numbers are intentional, not random. Each letter has a role.
-const CHARACTERS = {
-  M: { prop: "yPercent", to:  0.8, duration: 4.2, delayOffset: 0.0 },
-  A: { prop: "rotation", to:  1.2, duration: 3.4, delayOffset: 0.3 },
-  Y: { prop: "scaleY",   to:  1.03, duration: 2.8, delayOffset: 0.6, origin: "center bottom" },
-  O: { prop: "rotation", to: -2.0, duration: 5.5, delayOffset: 0.2 },
-  R: { prop: "yPercent", to: -2.0, duration: 1.8, delayOffset: 0.8 },
-};
-
 export function initMotion(gsap) {
   if (!gsap || reduceMotion()) return { destroy: () => {} };
 
-  const letters = Array.from(
-    document.querySelectorAll(".mayor-wrap svg text.l"),
-  );
-  if (letters.length === 0) return { destroy: () => {} };
+  const letters = Array.from(document.querySelectorAll(".mayor-wrap svg text.l"));
+  const shapes = Array.from(document.querySelectorAll(".shape"));
+  const stage = document.querySelector(".stage");
+  const hb = document.querySelector(".hud .hb");
 
-  // Normalize transform origin so SVG rotations pivot on each glyph.
+  // Normalize transform-box for SVG glyph rotations.
   letters.forEach((el) => {
     el.style.transformBox = "fill-box";
     el.style.transformOrigin = "center center";
   });
-
-  // ── Entrance ────────────────────────────────────────────
-  gsap.set(letters, { yPercent: TOKEN.entrance.fromY, opacity: 0 });
-  const entrance = gsap.to(letters, {
-    yPercent: 0,
-    opacity: 1,
-    duration: TOKEN.entrance.duration,
-    stagger: TOKEN.entrance.stagger,
-    ease: TOKEN.entrance.ease,
+  shapes.forEach((el) => {
+    el.style.transformBox = "fill-box";
+    el.style.transformOrigin = "center center";
   });
 
-  // ── Idle (starts after entrance completes) ──────────────
-  // Stored so we can pause/resume on tab visibility.
-  const idleTweens = [];
-  entrance.eventCallback("onComplete", () => {
-    letters.forEach((el) => {
-      const char = CHARACTERS[el.textContent];
-      if (!char) return;
-      const vars = {
-        [char.prop]: char.to,
-        duration: char.duration,
-        ease: "sine.inOut",
-        yoyo: true,
-        repeat: -1,
-        delay: char.delayOffset,
-      };
-      if (char.origin) vars.transformOrigin = char.origin;
-      idleTweens.push(gsap.to(el, vars));
+  // ── ENTRANCE ────────────────────────────────────────────
+  gsap.set(letters, { yPercent: 60, opacity: 0 });
+  gsap.set(shapes, { scale: 0, opacity: 0 });
+  gsap.set(".hud .label", { opacity: 0, y: 6 });
+
+  const tl = gsap.timeline({ defaults: { ease: "expo.out" } });
+  tl.to(shapes, {
+    scale: 1, opacity: 1,
+    duration: 1.2, stagger: { amount: 0.6, from: "random" },
+  }, 0)
+    .to(letters, {
+      yPercent: 0, opacity: 1,
+      duration: 1.1, stagger: 0.07, ease: "power3.out",
+    }, 0.2)
+    .to(".hud .label", {
+      opacity: 0.7, y: 0,
+      duration: 0.6, stagger: 0.08,
+    }, 0.6);
+
+  // ── AMBIENT: each letter has its own personality ───────
+  const [M, A, Y, O, R] = letters;
+  const idleStart = 1.4;
+
+  gsap.to(M, { yPercent: 0.8, duration: 4.2, ease: "sine.inOut", yoyo: true, repeat: -1, delay: idleStart });
+  gsap.to(A, { rotation: 1.2, duration: 3.4, ease: "sine.inOut", yoyo: true, repeat: -1, delay: idleStart + 0.3 });
+  gsap.to(Y, { scaleY: 1.03, transformOrigin: "center bottom", duration: 2.8, ease: "sine.inOut", yoyo: true, repeat: -1, delay: idleStart + 0.6 });
+  gsap.to(O, { rotation: -2, duration: 5.5, ease: "sine.inOut", yoyo: true, repeat: -1, delay: idleStart + 0.2 });
+  gsap.to(R, { yPercent: -2, duration: 1.8, ease: "sine.inOut", yoyo: true, repeat: -1, delay: idleStart + 0.8 });
+
+  // ── AMBIENT: shape drift ───────────────────────────────
+  // Each shape gets unique slow oscillations. Combination of x, y, rotation, scale.
+  shapes.forEach((shape, i) => {
+    const dur = 6 + (i % 5) * 1.3;
+    const xRange = 12 + (i % 4) * 6;
+    const yRange = 10 + (i % 3) * 5;
+    const rotRange = (i % 2 === 0 ? 1 : -1) * (8 + (i % 3) * 4);
+    gsap.to(shape, {
+      x: xRange, y: yRange, rotation: rotRange,
+      duration: dur,
+      ease: "sine.inOut",
+      yoyo: true,
+      repeat: -1,
+      delay: idleStart + (i * 0.08),
+    });
+    // Independent scale shimmer
+    gsap.to(shape, {
+      scale: 1.15,
+      duration: dur * 0.7,
+      ease: "sine.inOut",
+      yoyo: true,
+      repeat: -1,
+      delay: idleStart + 0.5 + (i * 0.05),
     });
   });
 
-  // ── Tab-return greet ─────────────────────────────────────
+  // ── HEARTBEAT pulse ────────────────────────────────────
+  if (hb) {
+    gsap.to(hb, {
+      scale: 1.6, opacity: 0.4,
+      duration: 1.2,
+      ease: "sine.inOut",
+      yoyo: true,
+      repeat: -1,
+    });
+  }
+
+  // ── CURSOR INFLUENCE ──────────────────────────────────
+  // Letters lean toward cursor; shapes parallax around it.
+  const lettersRot = letters.map((el) => gsap.quickTo(el, "rotation", { duration: 0.7, ease: "power3.out" }));
+  const lettersY = letters.map((el) => gsap.quickTo(el, "y", { duration: 0.7, ease: "power3.out" }));
+  const shapesX = shapes.map((el) => gsap.quickTo(el, "x", { duration: 1.1, ease: "power3.out" }));
+  const shapesY = shapes.map((el) => gsap.quickTo(el, "y", { duration: 1.1, ease: "power3.out" }));
+
+  let pointerActive = false;
+  const onPointerMove = (e) => {
+    pointerActive = true;
+    const w = window.innerWidth;
+    const h = window.innerHeight;
+    const nx = (e.clientX / w - 0.5) * 2;  // -1..1
+    const ny = (e.clientY / h - 0.5) * 2;
+
+    // Letters: rotation tilts toward pointer x; subtle vertical offset toward pointer y
+    letters.forEach((_, i) => {
+      const lx = (i - (letters.length - 1) / 2) / ((letters.length - 1) / 2); // -1..1
+      const tilt = (nx - lx) * 4; // closer letter tilts more toward cursor
+      lettersRot[i](tilt);
+      lettersY[i](ny * -3);
+    });
+
+    // Shapes: parallax — far ones move more, near ones less
+    shapes.forEach((_, i) => {
+      const depth = 0.3 + (i % 5) * 0.18;
+      shapesX[i](nx * 30 * depth);
+      shapesY[i](ny * 24 * depth);
+    });
+  };
+  window.addEventListener("pointermove", onPointerMove);
+
+  // ── CLICK SHOCKWAVE ────────────────────────────────────
+  const onClick = (e) => {
+    // Letters: brief squish + bounce
+    gsap.to(letters, {
+      keyframes: [
+        { scale: 0.93, duration: 0.15, ease: "power2.out" },
+        { scale: 1, duration: 0.7, ease: "elastic.out(1, 0.4)" },
+      ],
+      stagger: 0.04,
+      overwrite: "auto",
+    });
+    // Shapes: explosive scale + rotation kick
+    gsap.to(shapes, {
+      keyframes: [
+        { scale: 1.5, rotation: "+=20", duration: 0.25, ease: "power3.out" },
+        { scale: 1, rotation: "+=0", duration: 1.4, ease: "elastic.out(1, 0.45)" },
+      ],
+      stagger: { amount: 0.4, from: "random" },
+      overwrite: "auto",
+    });
+  };
+  stage.addEventListener("click", onClick);
+
+  // ── KEYBOARD: Space triggers shockwave too ────────────
+  window.addEventListener("keydown", (e) => {
+    if (e.key === " " || e.code === "Space") {
+      e.preventDefault();
+      onClick();
+    }
+  });
+
+  // ── TAB-RETURN GREET ──────────────────────────────────
   let hiddenAt = 0;
   const onVisibility = () => {
     if (document.hidden) {
       hiddenAt = Date.now();
-      idleTweens.forEach((t) => t.pause());
       return;
     }
-    // Resume idle from current position (no snap).
-    idleTweens.forEach((t) => t.resume());
-    // Only greet if we were actually hidden, and only if gone > 400ms
-    // (avoids firing on window blur/focus micro-events).
     if (hiddenAt && Date.now() - hiddenAt > 400) {
+      // Soft greet — letters lift, shapes ripple
       gsap.to(letters, {
         keyframes: [
-          { yPercent: TOKEN.greet.lift, duration: TOKEN.greet.up,   ease: "power2.out" },
-          { yPercent: 0,                 duration: TOKEN.greet.down, ease: "power2.inOut" },
+          { yPercent: -3, duration: 0.6, ease: "power2.out" },
+          { yPercent: 0, duration: 1.2, ease: "power2.inOut" },
         ],
-        stagger: TOKEN.greet.stagger,
+        stagger: 0.06,
+        overwrite: "auto",
+      });
+      gsap.to(shapes, {
+        keyframes: [
+          { scale: 1.18, duration: 0.5, ease: "power2.out" },
+          { scale: 1, duration: 1.4, ease: "power2.inOut" },
+        ],
+        stagger: { amount: 0.5, from: "random" },
         overwrite: "auto",
       });
     }
@@ -99,21 +191,21 @@ export function initMotion(gsap) {
   };
   document.addEventListener("visibilitychange", onVisibility);
 
-  // ── BFCache / pagehide cleanup (iOS Safari) ─────────────
-  // Without this, animations can resume mid-tween when the page is
-  // restored from BFCache, producing visible jumps.
+  // ── BFCache cleanup ────────────────────────────────────
   const onPageHide = () => {
-    entrance.kill();
-    idleTweens.forEach((t) => t.kill());
+    tl.kill();
+    gsap.killTweensOf("*");
   };
   window.addEventListener("pagehide", onPageHide);
 
   return {
     destroy: () => {
+      window.removeEventListener("pointermove", onPointerMove);
+      stage.removeEventListener("click", onClick);
       document.removeEventListener("visibilitychange", onVisibility);
       window.removeEventListener("pagehide", onPageHide);
-      entrance.kill();
-      idleTweens.forEach((t) => t.kill());
+      tl.kill();
+      gsap.killTweensOf("*");
     },
   };
 }
