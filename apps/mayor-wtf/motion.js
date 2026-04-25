@@ -1247,6 +1247,8 @@ export function initMotion(gsap) {
         note,
       });
     }
+    // Milestones: count this mining click. Function is hoisted from below.
+    bumpMilestoneClick();
     fireClick(e.clientX, e.clientY, true);
     fetch(`${SYNC_BASE}/event`, {
       method: "POST",
@@ -1665,6 +1667,8 @@ export function initMotion(gsap) {
           // Optimistic local: trigger sound preview if turning on
           if (next && soundOn) playStep(L, Tone ? Tone.now() : 0, 0.6);
           updateMood();
+          // Milestones: register first cell toggle. Cell-count is polled.
+          bumpMilestoneSeq();
           // Broadcast
           fetch(`${SYNC_BASE}/event`, {
             method: "POST",
@@ -2307,6 +2311,256 @@ export function initMotion(gsap) {
   }
   const idleInterval = setInterval(checkIdle, 1000);
 
+  // ── MILESTONES ───────────────────────────────────────────────────────
+  // Quiet celebrations across a session. Click-count, cells-active, and
+  // page-duration each trip taglined moments — fired once per session.
+  // Bias: small over big. The room rewards depth, not noise.
+  const milestoneState = {
+    fired: new Set(),
+    clickCount: 0,
+    seqInteracted: false,
+    sessionStart: Date.now(),
+  };
+
+  // Tagline element — top-center, fades in/out across ~4s lifetime.
+  if (!document.getElementById("milestone-style")) {
+    const ms = document.createElement("style");
+    ms.id = "milestone-style";
+    ms.textContent = `
+      .ms-tagline {
+        position: fixed;
+        top: clamp(34px, 7vh, 76px);
+        left: 50%;
+        transform: translateX(-50%);
+        z-index: 30;
+        pointer-events: none;
+        font-family: var(--display);
+        font-weight: 900;
+        font-size: clamp(18px, 2.4vw, 30px);
+        letter-spacing: -0.01em;
+        color: var(--y);
+        text-align: center;
+        white-space: nowrap;
+        opacity: 0;
+        text-shadow: 0 1px 0 rgba(0,0,0,0.4);
+      }
+      .ms-flash {
+        position: fixed;
+        inset: 0;
+        z-index: 28;
+        pointer-events: none;
+        background: var(--w);
+        opacity: 0;
+        mix-blend-mode: screen;
+      }
+      .ms-confetti {
+        position: fixed;
+        inset: 0;
+        z-index: 29;
+        pointer-events: none;
+        overflow: hidden;
+      }
+      .ms-confetti span {
+        position: absolute;
+        top: -24px;
+        width: 6px;
+        height: 14px;
+        background: var(--y);
+        border-radius: 1px;
+        will-change: transform, opacity;
+      }
+      .ms-warm-tint {
+        position: fixed;
+        inset: 0;
+        z-index: 5;
+        pointer-events: none;
+        background: radial-gradient(80% 60% at 50% 60%, rgba(255, 178, 60, 0.10), rgba(255, 178, 60, 0.04) 60%, rgba(255, 178, 60, 0) 100%);
+        opacity: 0;
+        mix-blend-mode: screen;
+        transition: opacity 6s ease;
+      }
+      .ms-warm-tint.on { opacity: 1; }
+    `;
+    document.head.appendChild(ms);
+  }
+
+  function showTagline(text) {
+    const el = document.createElement("div");
+    el.className = "ms-tagline";
+    el.setAttribute("aria-live", "polite");
+    el.textContent = text;
+    document.body.appendChild(el);
+    if (reduced) {
+      // Show statically for 4s in reduced-motion, then remove.
+      el.style.opacity = "1";
+      setTimeout(() => { try { el.remove(); } catch {} }, 4000);
+      return;
+    }
+    // 4s total: 0.5s fade-in, 3.0s hold, 0.5s fade-out.
+    gsap.fromTo(el,
+      { opacity: 0, y: -8 },
+      { opacity: 1, y: 0, duration: 0.5, ease: "power2.out" }
+    );
+    gsap.to(el, { opacity: 0, y: -6, duration: 0.5, ease: "power2.in", delay: 3.5,
+      onComplete: () => { try { el.remove(); } catch {} } });
+  }
+
+  function flashHero() {
+    if (reduced) return;
+    // Brief full-stage white wash, then the MAYOR letters snap to white
+    // and bleed back to yellow — the hero "flashes" in two beats.
+    const f = document.createElement("div");
+    f.className = "ms-flash";
+    document.body.appendChild(f);
+    gsap.fromTo(f,
+      { opacity: 0 },
+      { opacity: 0.85, duration: 0.06, ease: "power2.out" }
+    );
+    gsap.to(f, { opacity: 0, duration: 0.5, delay: 0.06, ease: "power2.in",
+      onComplete: () => { try { f.remove(); } catch {} } });
+    letters.forEach((l) => {
+      gsap.fromTo(l,
+        { fill: "var(--y)" },
+        { fill: "#ffffff", duration: 0.06, ease: "power2.out", overwrite: false }
+      );
+      gsap.to(l, { fill: "var(--y)", duration: 0.7, delay: 0.06, ease: "power2.inOut", overwrite: false });
+    });
+  }
+
+  function confettiRain() {
+    if (reduced) return;
+    const wrap = document.createElement("div");
+    wrap.className = "ms-confetti";
+    document.body.appendChild(wrap);
+    const N = 120;
+    const W = window.innerWidth;
+    const H = window.innerHeight;
+    const palette = ["var(--y)", "var(--y-warm)", "#ffffff"];
+    for (let i = 0; i < N; i++) {
+      const piece = document.createElement("span");
+      piece.style.left = (Math.random() * W) + "px";
+      piece.style.background = palette[Math.floor(Math.random() * palette.length)];
+      piece.style.transform = `rotate(${Math.random() * 360}deg)`;
+      wrap.appendChild(piece);
+      const fallDist = H + 80 + Math.random() * 200;
+      const drift = (Math.random() - 0.5) * 200;
+      const dur = 2.4 + Math.random() * 2.2;
+      gsap.to(piece, {
+        y: fallDist,
+        x: drift,
+        rotation: 360 + Math.random() * 720,
+        duration: dur,
+        ease: "power1.in",
+        delay: Math.random() * 0.6,
+      });
+      gsap.to(piece, {
+        opacity: 0,
+        duration: 0.6,
+        delay: dur * 0.7 + Math.random() * 0.4,
+      });
+    }
+    setTimeout(() => { try { wrap.remove(); } catch {} }, 6000);
+  }
+
+  function arpeggio() {
+    if (!soundOn || !pluckSynth) return;
+    // 4-note ascending arpeggio: A4, C5, E5, G5 — pulled from PENT high range.
+    const notes = ["A4", "C5", "E5", "G5"];
+    notes.forEach((n, i) => pluck(n, i * 0.12, 0.55));
+  }
+
+  let warmTintEl = null;
+  function warmTheRoom() {
+    if (warmTintEl) return;
+    warmTintEl = document.createElement("div");
+    warmTintEl.className = "ms-warm-tint";
+    warmTintEl.setAttribute("aria-hidden", "true");
+    document.body.appendChild(warmTintEl);
+    // Force a reflow so the transition has a starting state to ease from.
+    void warmTintEl.offsetHeight;
+    warmTintEl.classList.add("on");
+  }
+
+  function fireMilestone(id) {
+    if (milestoneState.fired.has(id)) return;
+    milestoneState.fired.add(id);
+    switch (id) {
+      case "click-1":
+        showTagline("your first note.");
+        break;
+      case "click-10":
+        arpeggio();
+        break;
+      case "click-30":
+        flashHero();
+        showTagline("thirty notes deep");
+        break;
+      case "click-100":
+        confettiRain();
+        showTagline("you live here now");
+        break;
+      case "seq-1":
+        showTagline("you're playing now.");
+        break;
+      case "seq-8":
+        showTagline("an actual groove");
+        break;
+      case "seq-16":
+        showTagline("a wall of sound");
+        break;
+      case "time-60":
+        showTagline("60 seconds in");
+        break;
+      case "time-300":
+        showTagline("you've stayed");
+        break;
+      case "time-900":
+        showTagline("you live here.");
+        warmTheRoom();
+        break;
+    }
+  }
+
+  function bumpMilestoneClick() {
+    milestoneState.clickCount++;
+    const c = milestoneState.clickCount;
+    if (c === 1) fireMilestone("click-1");
+    if (c === 10) fireMilestone("click-10");
+    if (c === 30) fireMilestone("click-30");
+    if (c === 100) fireMilestone("click-100");
+  }
+
+  function bumpMilestoneSeq() {
+    if (!milestoneState.seqInteracted) {
+      milestoneState.seqInteracted = true;
+      fireMilestone("seq-1");
+    }
+  }
+
+  function countCellsActive() {
+    let n = 0;
+    for (const L of SEQ_LETTERS) {
+      const row = seqGrid[L];
+      if (!row) continue;
+      for (let i = 0; i < row.length; i++) if (row[i]) n++;
+    }
+    return n;
+  }
+
+  function checkMilestones() {
+    if (document.hidden) return;
+    // Cells-active thresholds (cumulative — fire each at-or-above once).
+    const cells = countCellsActive();
+    if (cells >= 8) fireMilestone("seq-8");
+    if (cells >= 16) fireMilestone("seq-16");
+    // Time thresholds — page-duration in seconds since initMotion ran.
+    const dur = (Date.now() - milestoneState.sessionStart) / 1000;
+    if (dur >= 60) fireMilestone("time-60");
+    if (dur >= 300) fireMilestone("time-300");
+    if (dur >= 900) fireMilestone("time-900");
+  }
+  const milestoneInterval = setInterval(checkMilestones, 1000);
+
   // ── TILT TO NIGHT ──
   let night = 0, nightTarget = 0;
   let entranceDone = false;
@@ -2589,6 +2843,7 @@ export function initMotion(gsap) {
     if (heartbeatInterval) clearInterval(heartbeatInterval);
     clearInterval(idleInterval);
     clearInterval(grooveInterval);
+    clearInterval(milestoneInterval);
     if (nightRaf) cancelAnimationFrame(nightRaf);
     if (ghostState.recordTimeout) clearTimeout(ghostState.recordTimeout);
     cancelGhostPlayback();
@@ -2599,6 +2854,7 @@ export function initMotion(gsap) {
     if (ripplesHandle) ripplesHandle.destroy();
     if (es) { try { es.close(); } catch {} }
     if (chordWheelEl) { try { chordWheelEl.remove(); } catch {} chordWheelEl = null; }
+    if (warmTintEl) { try { warmTintEl.remove(); } catch {} warmTintEl = null; }
     gsap.killTweensOf("*");
   };
   window.addEventListener("pagehide", onPageHide);
@@ -2610,6 +2866,7 @@ export function initMotion(gsap) {
       if (heartbeatInterval) clearInterval(heartbeatInterval);
       clearInterval(idleInterval);
       clearInterval(grooveInterval);
+      clearInterval(milestoneInterval);
       if (nightRaf) cancelAnimationFrame(nightRaf);
       if (ghostState.recordTimeout) clearTimeout(ghostState.recordTimeout);
       cancelGhostPlayback();
@@ -2620,6 +2877,7 @@ export function initMotion(gsap) {
       if (ripplesHandle) ripplesHandle.destroy();
       if (es) { try { es.close(); } catch {} }
       if (chordWheelEl) { try { chordWheelEl.remove(); } catch {} chordWheelEl = null; }
+      if (warmTintEl) { try { warmTintEl.remove(); } catch {} warmTintEl = null; }
       window.removeEventListener("pagehide", onPageHide);
       gsap.killTweensOf("*");
     },
