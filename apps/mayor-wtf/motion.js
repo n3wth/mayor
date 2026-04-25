@@ -569,6 +569,7 @@ export function initMotion(gsap) {
 
   // ── STATS poll for field intensity (subtle background warmth) ──
   let lastStats = null;
+  let statsIntensity = 0;
   async function pollStats() {
     try {
       const res = await fetch("/api/stats", { cache: "no-cache" });
@@ -584,17 +585,40 @@ export function initMotion(gsap) {
         return 0.05;
       })();
       const activeScore = Math.min(1, (s.active_sessions || 0) / 3);
-      const intensity = Math.min(1, 0.45 * pulse + 0.35 * activeScore + 0.20 * ageScore);
-      if (fieldHandle) fieldHandle.setIntensity(intensity);
+      statsIntensity = Math.min(1, 0.45 * pulse + 0.35 * activeScore + 0.20 * ageScore);
       lastStats = s;
     } catch {}
   }
   pollStats();
   const pollInterval = setInterval(pollStats, 5000);
 
+  // ── TILT TO NIGHT ──
+  // Cursor near top of viewport → scene dims, stars brighten. Reads as
+  // looking up at the night sky. Smooth lerp toward target every frame.
+  let night = 0;
+  let nightTarget = 0;
+  let entranceDone = false;
+  if (!reduced) setTimeout(() => { entranceDone = true; }, 2400);
+  const starsLayer = document.querySelector(".stars");
+  const heroBack = document.querySelector(".hero .layer.back");
+  window.addEventListener("pointermove", (e) => {
+    nightTarget = e.clientY < 60 ? 1 : 0;
+  }, { passive: true });
+  window.addEventListener("pointerleave", () => { nightTarget = 0; }, { passive: true });
+  let nightRaf = 0;
+  function nightTick() {
+    night += (nightTarget - night) * 0.04;
+    if (fieldHandle) fieldHandle.setIntensity(statsIntensity * (1 - night * 0.7));
+    if (starsLayer) starsLayer.style.opacity = String(0.4 + night * 0.6);
+    if (heroBack && entranceDone) heroBack.style.opacity = String(1 - night * 0.5);
+    nightRaf = requestAnimationFrame(nightTick);
+  }
+  if (!reduced) nightRaf = requestAnimationFrame(nightTick);
+
   // ── CLEANUP ──
   const onPageHide = () => {
     clearInterval(pollInterval);
+    if (nightRaf) cancelAnimationFrame(nightRaf);
     if (fieldHandle) fieldHandle.destroy();
     if (starsHandle) starsHandle.destroy();
     if (ripplesHandle) ripplesHandle.destroy();
@@ -605,6 +629,7 @@ export function initMotion(gsap) {
   return {
     destroy: () => {
       clearInterval(pollInterval);
+      if (nightRaf) cancelAnimationFrame(nightRaf);
       if (fieldHandle) fieldHandle.destroy();
       if (starsHandle) starsHandle.destroy();
       if (ripplesHandle) ripplesHandle.destroy();
