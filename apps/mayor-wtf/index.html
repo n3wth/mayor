@@ -29,7 +29,9 @@
 <style>
   :root {
     --y: #f2e437;
-    --k: #0a0a0a;
+    --y-deep: #d6c419;
+    --y-bright: #ffe54d;
+    --k: #050505;
     --w: #ffffff;
     --display: "Display", "Arial Narrow Bold", "Arial Narrow", sans-serif;
     --mono: "Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
@@ -40,17 +42,75 @@
   body {
     font-family: var(--sans);
     -webkit-font-smoothing: antialiased;
-    cursor: crosshair;
+    cursor: none;
   }
 
   .stage { position: fixed; inset: 0; overflow: hidden; }
 
-  /* The whole viewport is a yellow plane. MAYOR + objects punch black holes.
-     One cutout per session today, one per citizen. Organic placement. */
-  .field { position: absolute; inset: 0; z-index: 1; pointer-events: none; }
-  .field svg { display: block; width: 100%; height: 100%; }
+  /* WebGL mesh-gradient background. Yellow on yellow with depth. */
+  .field { position: absolute; inset: 0; z-index: 0; pointer-events: none; }
+  .field canvas { display: block; width: 100%; height: 100%; }
 
-  .sparks { position: absolute; inset: 0; pointer-events: none; z-index: 5; overflow: hidden; }
+  /* Subtle film grain over everything for depth */
+  .grain {
+    position: absolute; inset: 0; z-index: 8; pointer-events: none;
+    opacity: 0.08; mix-blend-mode: overlay;
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='180' height='180'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.95' numOctaves='2' seed='4'/><feColorMatrix values='0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
+    background-size: 180px 180px;
+  }
+
+  /* Hero MAYOR — three layered SVGs creating parallax depth */
+  .hero {
+    position: absolute;
+    inset: 0;
+    display: grid;
+    place-items: center;
+    z-index: 3;
+    pointer-events: none;
+  }
+  .hero .layer {
+    position: absolute;
+    inset: 0;
+    display: grid;
+    place-items: center;
+    will-change: transform, filter;
+  }
+  .hero svg {
+    width: min(94vw, 1400px);
+    height: auto;
+    overflow: visible;
+  }
+  .hero .layer text {
+    font-family: var(--display);
+    font-weight: 900;
+    text-anchor: middle;
+  }
+
+  /* Back layer: blurred yellow ghost — gives the title a halo of light */
+  .hero .layer.back text {
+    fill: var(--y-bright);
+    filter: blur(34px);
+    opacity: 0.45;
+  }
+
+  /* Mid layer: solid yellow body, subtle inner shadow via SVG filter */
+  .hero .layer.mid text {
+    fill: var(--y);
+  }
+
+  /* Front: thin black inner stroke for crisp edge — almost invisible */
+  .hero .layer.front text {
+    fill: none;
+    stroke: rgba(0,0,0,0.18);
+    stroke-width: 1;
+  }
+
+  /* Particle stream layer */
+  .stream { position: absolute; inset: 0; z-index: 4; pointer-events: none; }
+  .stream canvas { display: block; width: 100%; height: 100%; }
+
+  /* Sparks layer — accent colored bursts on real events */
+  .sparks { position: absolute; inset: 0; pointer-events: none; z-index: 6; overflow: hidden; }
   .spark {
     position: absolute;
     width: 6px; height: 6px;
@@ -60,45 +120,135 @@
     mix-blend-mode: screen;
   }
 
-  /* The CTA — lowercase bold white at the bottom (original). */
-  .cta {
+  /* Custom cursor — soft yellow halo with delayed center */
+  .cursor-halo, .cursor-dot {
+    position: fixed;
+    top: 0; left: 0;
+    pointer-events: none;
+    z-index: 50;
+    transform: translate3d(-100px, -100px, 0);
+    will-change: transform;
+  }
+  .cursor-halo {
+    width: 80px; height: 80px;
+    margin: -40px 0 0 -40px;
+    border-radius: 50%;
+    background: radial-gradient(circle, rgba(242,228,55,0.35) 0%, rgba(242,228,55,0.0) 70%);
+    mix-blend-mode: screen;
+  }
+  .cursor-dot {
+    width: 6px; height: 6px;
+    margin: -3px 0 0 -3px;
+    border-radius: 50%;
+    background: var(--w);
+  }
+
+  /* Glass card holding the CTA — subtle frosted pane */
+  .glass {
     position: absolute;
     left: 50%;
-    bottom: clamp(40px, 6vh, 64px);
+    bottom: clamp(40px, 7vh, 90px);
     transform: translateX(-50%);
     pointer-events: auto;
+    z-index: 12;
+    padding: clamp(14px, 1.6vw, 18px) clamp(22px, 2.4vw, 32px);
+    border: 1px solid rgba(242, 228, 55, 0.22);
+    border-radius: 999px;
+    background: rgba(8, 8, 8, 0.32);
+    -webkit-backdrop-filter: blur(20px) saturate(140%);
+    backdrop-filter: blur(20px) saturate(140%);
+    box-shadow:
+      inset 0 1px 0 rgba(255,255,255,0.06),
+      inset 0 -1px 0 rgba(0,0,0,0.5),
+      0 30px 60px -30px rgba(0,0,0,0.8);
+    transition: transform .4s cubic-bezier(.2,.8,.2,1), border-color .4s ease;
+  }
+  .glass:hover { border-color: rgba(242, 228, 55, 0.55); }
+  .cta {
     font-family: var(--sans);
-    font-weight: 700;
-    font-size: clamp(13px, 1.3vw, 16px);
-    letter-spacing: 0;
+    font-weight: 600;
+    font-size: clamp(13px, 1.2vw, 15px);
+    letter-spacing: 0.01em;
     text-transform: lowercase;
     color: var(--w);
     text-decoration: none;
-    z-index: 11;
-    transition: opacity .25s ease;
-    opacity: 0.92;
+    display: inline-flex;
+    align-items: center;
+    gap: 12px;
   }
-  .cta:hover { opacity: 1; text-decoration: underline; text-underline-offset: 4px; }
+  .cta::before {
+    content: "";
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: var(--y);
+    box-shadow: 0 0 16px var(--y);
+  }
 
-  /* HUD: implicit. n3wth.com only. */
-  .hud {
+  /* Top-right link in glass pill too */
+  .topright {
     position: absolute;
-    top: clamp(20px, 4vw, 32px);
-    right: clamp(20px, 4vw, 32px);
-    font-family: var(--sans);
-    font-weight: 700;
-    font-size: clamp(11px, 1vw, 13px);
-    text-transform: lowercase;
-    color: var(--w);
+    top: clamp(20px, 3vw, 28px);
+    right: clamp(20px, 3vw, 28px);
+    z-index: 12;
     pointer-events: auto;
-    z-index: 10;
-    opacity: 0.7;
+    padding: 8px 16px;
+    border: 1px solid rgba(255,255,255,0.12);
+    border-radius: 999px;
+    background: rgba(8, 8, 8, 0.32);
+    -webkit-backdrop-filter: blur(16px) saturate(140%);
+    backdrop-filter: blur(16px) saturate(140%);
+    font-family: var(--sans);
+    font-size: clamp(11px, 1vw, 12px);
+    font-weight: 600;
+    text-transform: lowercase;
+    transition: border-color .3s ease;
   }
-  .hud a { color: inherit; text-decoration: none; }
-  .hud a:hover { text-decoration: underline; text-underline-offset: 4px; opacity: 1; }
+  .topright:hover { border-color: rgba(255,255,255,0.4); }
+  .topright a { color: var(--w); text-decoration: none; opacity: 0.85; }
+
+  /* Status chip top-left */
+  .status {
+    position: absolute;
+    top: clamp(20px, 3vw, 28px);
+    left: clamp(20px, 3vw, 28px);
+    z-index: 12;
+    pointer-events: auto;
+    padding: 8px 14px;
+    border: 1px solid rgba(255,255,255,0.10);
+    border-radius: 999px;
+    background: rgba(8, 8, 8, 0.32);
+    -webkit-backdrop-filter: blur(16px) saturate(140%);
+    backdrop-filter: blur(16px) saturate(140%);
+    font-family: var(--mono);
+    font-size: 10.5px;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: rgba(255,255,255,0.7);
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .status::before {
+    content: "";
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: var(--y);
+    box-shadow: 0 0 8px var(--y);
+    animation: pulse 2.4s ease-in-out infinite;
+  }
+  @keyframes pulse {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.45; transform: scale(0.8); }
+  }
 
   @media (prefers-reduced-motion: reduce) {
     * { animation: none !important; transition: none !important; }
+    body { cursor: auto; }
+    .cursor-halo, .cursor-dot, .grain { display: none; }
+  }
+  @media (max-width: 700px) {
+    body { cursor: auto; }
+    .cursor-halo, .cursor-dot { display: none; }
   }
 </style>
 </head>
@@ -106,47 +256,62 @@
 
 <div class="stage">
 
+  <!-- Volumetric yellow mesh background -->
   <div class="field" aria-hidden="true">
-    <svg viewBox="0 0 1600 1000" preserveAspectRatio="xMidYMid slice">
-      <defs>
-        <mask id="cutout" maskUnits="userSpaceOnUse" x="0" y="0" width="1600" height="1000">
-          <rect x="0" y="0" width="1600" height="1000" fill="white"/>
-
-          <!-- MAYOR — the only typographic statement. Knockout.
-               Each letter is its own <text> so motion.js can target one. -->
-          <g id="mayor-text" font-family="Display, Arial Narrow Bold, sans-serif"
-                             font-weight="900" font-size="420"
-                             text-anchor="middle" fill="black">
-            <text class="ml" data-letter="M" x="475"  y="600">M</text>
-            <text class="ml" data-letter="A" x="640"  y="600">A</text>
-            <text class="ml" data-letter="Y" x="800"  y="600">Y</text>
-            <text class="ml" data-letter="O" x="965"  y="600">O</text>
-            <text class="ml" data-letter="R" x="1130" y="600">R</text>
-          </g>
-
-          <!-- Constellation lines: motion.js draws these between MAYOR letters and sessions. -->
-          <g id="lines" stroke="black" stroke-width="1" fill="none"></g>
-
-          <!-- Ripple pool: temporary expanding rings on real events. -->
-          <g id="ripples" stroke="black" fill="none"></g>
-
-          <!-- Object pool: motion.js populates these dynamically based on stats.
-               Each cutout = one session or citizen. -->
-          <g id="objects"></g>
-        </mask>
-      </defs>
-
-      <rect x="0" y="0" width="1600" height="1000" fill="var(--y)" mask="url(#cutout)"/>
-    </svg>
+    <canvas data-field></canvas>
   </div>
 
+  <!-- Hero with three depth layers -->
+  <div class="hero" aria-label="Mayor">
+    <!-- Soft halo -->
+    <div class="layer back" data-layer="back">
+      <svg viewBox="0 0 1400 460" preserveAspectRatio="xMidYMid meet">
+        <text x="700" y="360" font-size="420" letter-spacing="-14">MAYOR</text>
+      </svg>
+    </div>
+    <!-- Solid body -->
+    <div class="layer mid" data-layer="mid">
+      <svg viewBox="0 0 1400 460" preserveAspectRatio="xMidYMid meet">
+        <g id="mayor-letters">
+          <text class="ml" data-letter="M" x="180"  y="360" font-size="420">M</text>
+          <text class="ml" data-letter="A" x="440"  y="360" font-size="420">A</text>
+          <text class="ml" data-letter="Y" x="700"  y="360" font-size="420">Y</text>
+          <text class="ml" data-letter="O" x="960"  y="360" font-size="420">O</text>
+          <text class="ml" data-letter="R" x="1220" y="360" font-size="420">R</text>
+        </g>
+      </svg>
+    </div>
+    <!-- Thin edge accent -->
+    <div class="layer front" data-layer="front">
+      <svg viewBox="0 0 1400 460" preserveAspectRatio="xMidYMid meet">
+        <text x="700" y="360" font-size="420" letter-spacing="-14">MAYOR</text>
+      </svg>
+    </div>
+  </div>
+
+  <!-- Particle stream — black ink particles flowing along a field -->
+  <div class="stream" aria-hidden="true">
+    <canvas data-stream></canvas>
+  </div>
+
+  <!-- Sparks layer — colored bursts on real events -->
   <div class="sparks" data-sparks aria-hidden="true"></div>
 
-  <a class="cta" href="mailto:um@mayor.wtf">um@mayor.wtf</a>
+  <!-- HUD chips -->
+  <div class="status"><span data-stat="status">connecting</span></div>
+  <div class="topright"><a href="https://n3wth.com">n3wth.com</a></div>
 
-  <div class="hud">
-    <a href="https://n3wth.com">n3wth.com</a>
+  <!-- Glass pill CTA -->
+  <div class="glass">
+    <a class="cta" href="mailto:um@mayor.wtf">um@mayor.wtf</a>
   </div>
+
+  <!-- Custom cursor -->
+  <div class="cursor-halo" data-cursor-halo aria-hidden="true"></div>
+  <div class="cursor-dot" data-cursor-dot aria-hidden="true"></div>
+
+  <!-- Film grain on top -->
+  <div class="grain" aria-hidden="true"></div>
 
 </div>
 
