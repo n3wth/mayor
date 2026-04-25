@@ -512,6 +512,93 @@ export function initMotion(gsap) {
     }).catch(() => {});
   }
 
+  // ── COLLABORATIVE PALETTE: click letter → click color → all peers update ──
+  const root = document.documentElement;
+  const palette = document.querySelector("[data-palette]");
+  const paletteButtons = palette ? Array.from(palette.querySelectorAll("button")) : [];
+  let selectedLetter = null;
+
+  function applyLetterColor(letter, color, animate = true) {
+    if (!letter || !color) return;
+    const varName = `--letter-color-${letter}`;
+    if (animate) {
+      // Tween via a proxy so we can blend old → new color smoothly.
+      const cur = getComputedStyle(root).getPropertyValue(varName).trim() || "#f0d72a";
+      const proxy = { v: 0 };
+      gsap.to(proxy, {
+        v: 1,
+        duration: 1.0,
+        ease: "sine.inOut",
+        onUpdate: () => {
+          // Linear interp between cur and color via canvas
+          const blended = lerpHex(cur, color, proxy.v);
+          root.style.setProperty(varName, blended);
+        },
+        onComplete: () => root.style.setProperty(varName, color),
+      });
+    } else {
+      root.style.setProperty(varName, color);
+    }
+  }
+
+  function lerpHex(a, b, t) {
+    const pa = parseHex(a), pb = parseHex(b);
+    if (!pa || !pb) return b;
+    const r = Math.round(pa[0] + (pb[0] - pa[0]) * t);
+    const g = Math.round(pa[1] + (pb[1] - pa[1]) * t);
+    const bl = Math.round(pa[2] + (pb[2] - pa[2]) * t);
+    return `rgb(${r},${g},${bl})`;
+  }
+  function parseHex(s) {
+    s = s.trim();
+    if (s.startsWith("#")) {
+      const h = s.slice(1);
+      const n = h.length === 3 ? h.split("").map((c) => c + c).join("") : h;
+      return [parseInt(n.slice(0, 2), 16), parseInt(n.slice(2, 4), 16), parseInt(n.slice(4, 6), 16)];
+    }
+    const m = s.match(/rgb\((\d+),\s*(\d+),\s*(\d+)\)/);
+    if (m) return [+m[1], +m[2], +m[3]];
+    return null;
+  }
+
+  // Letter selection: clicking a MAYOR letter "arms" the palette for it.
+  letters.forEach((l) => {
+    l.addEventListener("click", (e) => {
+      e.stopPropagation();
+      letters.forEach((x) => x.classList.remove("selected"));
+      l.classList.add("selected");
+      selectedLetter = l.dataset.letter;
+    });
+  });
+
+  // Click outside the letters: deselect.
+  document.querySelector(".stage").addEventListener("pointerdown", (e) => {
+    if (e.target.closest(".ml") || e.target.closest(".palette")) return;
+    letters.forEach((x) => x.classList.remove("selected"));
+    selectedLetter = null;
+  });
+
+  // Palette click: publish color for the selected letter (or all letters
+  // if none selected — fun default for "first time" interactions).
+  paletteButtons.forEach((b) => {
+    b.addEventListener("click", () => {
+      const color = b.dataset.color;
+      paletteButtons.forEach((x) => x.classList.toggle("active", x === b));
+      const targets = selectedLetter ? [selectedLetter] : ["M", "A", "Y", "O", "R"];
+      targets.forEach((letter) => {
+        applyLetterColor(letter, color);
+        fetch(`${SYNC_BASE}/event`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ type: "color", letter, color, from: SELF_ID }),
+          keepalive: true,
+        }).catch(() => {});
+      });
+      // Reset palette swatch active state after a beat — it's transient
+      setTimeout(() => paletteButtons.forEach((x) => x.classList.remove("active")), 1400);
+    });
+  });
+
   // Open SSE connection for incoming events.
   let es = null;
   function connectSync() {
@@ -525,8 +612,28 @@ export function initMotion(gsap) {
             updatePresence(ev.count);
             return;
           }
+          if (ev.type === "colors") {
+            // Snapshot on connect — apply current colors instantly.
+            for (const [letter, color] of Object.entries(ev.colors || {})) {
+              applyLetterColor(letter, color, false);
+            }
+            return;
+          }
           // Ignore our own echoes
           if (ev.from === SELF_ID) return;
+          if (ev.type === "color") {
+            applyLetterColor(ev.letter, ev.color);
+            // Letter does a small acknowledgement hop
+            const target = letters.find((l) => l.dataset.letter === ev.letter);
+            if (target) {
+              gsap.fromTo(target,
+                { y: 0 },
+                { y: -8, duration: 0.3, ease: "back.out(2)" }
+              );
+              gsap.to(target, { y: 0, duration: 0.9, ease: E.bounce, delay: 0.3 });
+            }
+            return;
+          }
           if (ev.type === "click" || ev.type === "tab") {
             ghostRipple(ev.x ?? 0.5, ev.y ?? 0.5);
           } else if (ev.type === "wave") {
