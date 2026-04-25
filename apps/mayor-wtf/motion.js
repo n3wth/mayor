@@ -92,19 +92,95 @@ export function initMotion(gsap) {
     }, { passive: true });
   }
 
-  // ── MAYOR text breath: tweens letter-spacing slightly ──
+  // ── MAYOR LETTERS: per-letter ambient breath + delight bursts ──
+  // Each letter is a <text> in the mask. Subtle independent yoyo so the
+  // word feels alive without looking choreographed.
+  const letters = Array.from(document.querySelectorAll(".ml"));
+  const letterPos = new Map(); // letter el -> {cx, cy} in viewBox coords
+  letters.forEach((l) => {
+    l.style.transformBox = "fill-box";
+    l.style.transformOrigin = "center center";
+    const cx = Number(l.getAttribute("x"));
+    const cy = Number(l.getAttribute("y")) - 110; // visual letter center, not baseline
+    letterPos.set(l, { cx, cy });
+  });
+
   if (!reduced) {
-    const t = document.getElementById("mayor-text");
-    if (t) {
-      const proxy = { v: -14 };
-      gsap.to(proxy, {
-        v: -11,
-        duration: 7,
-        ease: E.inOut,
-        yoyo: true,
-        repeat: -1,
-        onUpdate: () => t.setAttribute("letter-spacing", String(proxy.v)),
-      });
+    const breathConfigs = [
+      { yPercent: 0.6, dur: 4.4, delay: 0.0 },
+      { rotation: 1.0, dur: 3.6, delay: 0.3 },
+      { scaleY: 1.02,  dur: 2.8, delay: 0.6 },
+      { rotation: -1.4, dur: 5.2, delay: 0.2 },
+      { yPercent: -1.2, dur: 1.9, delay: 0.7 },
+    ];
+    letters.forEach((l, i) => {
+      const cfg = breathConfigs[i] || breathConfigs[0];
+      gsap.to(l, { ...cfg, ease: E.inOut, yoyo: true, repeat: -1 });
+    });
+  }
+
+  // Letter delight: pick a random letter, do a happy hop, emit colored
+  // sparks tangent to it in a fountain. Used on real events (new email,
+  // citizen promo) and occasionally on click.
+  function delightLetter(opts = {}) {
+    if (reduced || !letters.length) return;
+    const letter = opts.letter || letters[Math.floor(Math.random() * letters.length)];
+    const sparkCount = opts.count ?? 16;
+    const direction = opts.direction ?? -1; // -1 = upward fountain
+
+    // Letter hops & wobbles
+    gsap.timeline({ overwrite: false })
+      .to(letter, { yPercent: -6, scale: 1.06, duration: 0.35, ease: "back.out(2)" }, 0)
+      .to(letter, { rotation: (Math.random() - 0.5) * 18, duration: 0.35, ease: "back.out(2)" }, 0)
+      .to(letter, { yPercent: 0, scale: 1, rotation: 0, duration: 1.2, ease: E.bounce }, 0.35);
+
+    // Sparks above the letter — fountain shape, biased by `direction`
+    if (sparksLayer) {
+      const pos = letterPos.get(letter);
+      if (pos) {
+        const { x, y } = svgToScreen(pos.cx, pos.cy);
+        // Custom emit so sparks shoot upward in a cone, not radial.
+        for (let i = 0; i < sparkCount; i++) {
+          const el = document.createElement("div");
+          el.className = "spark";
+          const color = SPARK_COLORS[Math.floor(Math.random() * SPARK_COLORS.length)];
+          const size = 4 + Math.random() * 7;
+          el.style.width = `${size}px`;
+          el.style.height = `${size}px`;
+          el.style.left = `${x}px`;
+          el.style.top = `${y}px`;
+          el.style.background = color;
+          el.style.boxShadow = `0 0 ${size * 2}px ${color}`;
+          sparksLayer.appendChild(el);
+
+          // Cone aimed up: angle in [-π/2 - 0.8 ... -π/2 + 0.8]
+          const baseAngle = direction < 0 ? -Math.PI / 2 : Math.PI / 2;
+          const angle = baseAngle + (Math.random() - 0.5) * 1.6;
+          const dist = 80 + Math.random() * 240;
+          const dx = Math.cos(angle) * dist;
+          const dy = Math.sin(angle) * dist;
+          const dur = 1.0 + Math.random() * 0.9;
+
+          gsap.fromTo(el,
+            { x: 0, y: 0, scale: 0.2, opacity: 1 },
+            { x: dx, y: dy + 30, scale: 1, duration: dur, ease: "power2.out" }
+          );
+          // Gravity tail: continue downward after peak
+          gsap.to(el, {
+            y: dy + 180,
+            duration: dur * 0.9,
+            delay: dur * 0.7,
+            ease: "power2.in",
+          });
+          gsap.to(el, {
+            opacity: 0, scale: 0.2,
+            duration: 0.6,
+            delay: dur * 1.1,
+            ease: "power2.in",
+            onComplete: () => el.remove(),
+          });
+        }
+      }
     }
   }
 
@@ -255,7 +331,6 @@ export function initMotion(gsap) {
   // ── CLICK SHOCKWAVE ──
   function shockwave(e) {
     if (reduced) return;
-    // Briefly inflate all live objects, then settle.
     for (const obj of live.values()) {
       const r = Number(obj.el.getAttribute("r")) || 10;
       gsap.fromTo(obj.el,
@@ -264,6 +339,8 @@ export function initMotion(gsap) {
       );
     }
     if (e && sparksLayer) emitSparks(gsap, sparksLayer, e.clientX, e.clientY, 12, { radius: 200 });
+    // 1-in-3 chance of letter delight on click — keeps it surprising
+    if (Math.random() < 0.34) delightLetter({ count: 12 });
   }
   if (!reduced) {
     document.querySelector(".stage").addEventListener("click", (e) => {
@@ -325,18 +402,19 @@ export function initMotion(gsap) {
     }
     reflowCitizens(Math.max(citizens, 3));
 
-    // EVENTS: real changes since last poll → colored sparks.
+    // EVENTS: real changes since last poll → object sparks + letter delight.
     if (lastStats) {
       const newSession = sessions > (lastStats.sessions_today || 0);
       const newCitizen = citizens > (lastStats.citizens || 0);
       if (newSession && sparksLayer) {
-        // Spark from the most recently spawned session position
         const idx = sessions - 1;
         const obj = live.get(`session-${dayKey}-${idx}`);
         if (obj) {
           const { x, y } = svgToScreen(obj.x, obj.y);
           emitSparks(gsap, sparksLayer, x, y, 14, { radius: 180 });
         }
+        // Random letter does a happy hop + colored fountain
+        delightLetter({ count: 18 });
       }
       if (newCitizen && sparksLayer) {
         const idx = citizens - 1;
@@ -345,6 +423,10 @@ export function initMotion(gsap) {
           const { x, y } = svgToScreen(obj.x, obj.y);
           emitSparks(gsap, sparksLayer, x, y, 22, { radius: 200 });
         }
+        // All five letters do a wave on a citizen promotion
+        letters.forEach((l, i) => {
+          setTimeout(() => delightLetter({ letter: l, count: 10 }), i * 90);
+        });
       }
     }
 

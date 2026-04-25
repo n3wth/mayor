@@ -112,15 +112,17 @@
         <mask id="cutout" maskUnits="userSpaceOnUse" x="0" y="0" width="1600" height="1000">
           <rect x="0" y="0" width="1600" height="1000" fill="white"/>
 
-          <!-- MAYOR — the only typographic statement. Knockout. -->
-          <text id="mayor-text"
-                font-family="Display, Arial Narrow Bold, sans-serif"
-                font-weight="900"
-                font-size="420"
-                text-anchor="middle"
-                x="800" y="600"
-                letter-spacing="-14"
-                fill="black">MAYOR</text>
+          <!-- MAYOR — the only typographic statement. Knockout.
+               Each letter is its own <text> so motion.js can target one. -->
+          <g id="mayor-text" font-family="Display, Arial Narrow Bold, sans-serif"
+                             font-weight="900" font-size="420"
+                             text-anchor="middle" fill="black">
+            <text class="ml" data-letter="M" x="475"  y="600">M</text>
+            <text class="ml" data-letter="A" x="640"  y="600">A</text>
+            <text class="ml" data-letter="Y" x="800"  y="600">Y</text>
+            <text class="ml" data-letter="O" x="965"  y="600">O</text>
+            <text class="ml" data-letter="R" x="1130" y="600">R</text>
+          </g>
 
           <!-- Object pool: motion.js populates these dynamically based on stats.
                Each cutout = one session or citizen. -->
