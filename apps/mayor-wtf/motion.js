@@ -1665,6 +1665,7 @@ export function initMotion(gsap) {
           // Optimistic local: trigger sound preview if turning on
           if (next && soundOn) playStep(L, Tone ? Tone.now() : 0, 0.6);
           updateMood();
+          checkQuests();
           // Broadcast
           fetch(`${SYNC_BASE}/event`, {
             method: "POST",
@@ -1774,6 +1775,7 @@ export function initMotion(gsap) {
       }
     }
     updateMood();
+    checkQuests();
   }
   function applyStepFromPeer(L, idx, on) {
     if (!SEQ_LETTERS.includes(L) || idx < 0 || idx >= SEQ_STEPS) return;
@@ -1781,6 +1783,7 @@ export function initMotion(gsap) {
     const c = seqEl?.querySelector(`.cell[data-letter="${L}"][data-idx="${idx}"]`);
     if (c) c.classList.toggle("on", !!on);
     updateMood();
+    checkQuests();
   }
 
   // Voices per letter — instantiated once when audio is enabled.
@@ -2580,6 +2583,411 @@ export function initMotion(gsap) {
       else openGalaxy();
     }
   });
+
+  // ── QUESTS ────────────────────────────────────────────────────────────
+  // Five small musical goals to chase. Press `q` to open the panel; mutate
+  // the grid (locally or from a peer) and quests check themselves. Done
+  // state persists across visits via localStorage; reward fires once per
+  // completion in a session (re-completable across sessions if cleared).
+  const QUEST_LS_KEY = "mayor_quests_done_v1";
+  const QUESTS = [
+    {
+      id: "four-on-floor",
+      title: "Make a four-on-the-floor",
+      hint: "Kick on every 4th step (M cells at 0, 4, 8, 12).",
+      check: () => [0, 4, 8, 12].every((i) => seqGrid.M[i]),
+      reward: () => rewardFourOnFloor(),
+    },
+    {
+      id: "find-silence",
+      title: "Find the silence",
+      hint: "Clear every cell. 0 of 80.",
+      check: () => SEQ_LETTERS.every((L) => seqGrid[L].every((v) => !v)),
+      reward: () => rewardSilence(),
+    },
+    {
+      id: "ride-hat",
+      title: "Ride the hat",
+      hint: "Every Y cell active (16 of 16).",
+      check: () => seqGrid.Y.every(Boolean),
+      reward: () => rewardRideHat(),
+    },
+    {
+      id: "build-groove",
+      title: "Build a groove",
+      hint: "At least one cell active in each of M A Y O R.",
+      check: () => SEQ_LETTERS.every((L) => seqGrid[L].some(Boolean)),
+      reward: () => rewardGroove(),
+    },
+    {
+      id: "off-grid",
+      title: "Off-grid",
+      hint: "8+ cells active on non-multiples-of-4 indices.",
+      check: () => {
+        let n = 0;
+        for (const L of SEQ_LETTERS) {
+          for (let i = 0; i < SEQ_STEPS; i++) {
+            if (seqGrid[L][i] && i % 4 !== 0) n++;
+          }
+        }
+        return n >= 8;
+      },
+      reward: () => rewardOffGrid(),
+    },
+  ];
+
+  // Persistent done set (cross-session). Session-fired set prevents the
+  // same reward from triggering twice in one tab.
+  let questsDone = new Set();
+  const sessionFired = new Set();
+  try {
+    const raw = localStorage.getItem(QUEST_LS_KEY);
+    if (raw) {
+      const arr = JSON.parse(raw);
+      if (Array.isArray(arr)) questsDone = new Set(arr.filter((x) => typeof x === "string"));
+    }
+  } catch {}
+  function saveQuestsDone() {
+    try { localStorage.setItem(QUEST_LS_KEY, JSON.stringify([...questsDone])); } catch {}
+  }
+
+  // Floating tagline used by several rewards. One element, fades.
+  let questTaglineEl = null;
+  function ensureQuestTagline() {
+    if (questTaglineEl) return questTaglineEl;
+    questTaglineEl = document.createElement("div");
+    questTaglineEl.className = "quest-tagline";
+    questTaglineEl.setAttribute("aria-live", "polite");
+    questTaglineEl.style.cssText = [
+      "position:fixed",
+      "left:50%",
+      "top:18%",
+      "transform:translateX(-50%)",
+      "z-index:35",
+      "pointer-events:none",
+      "font-family:var(--mono, ui-monospace, monospace)",
+      "font-size:13px",
+      "letter-spacing:0.18em",
+      "text-transform:uppercase",
+      "color:var(--y, #f0d72a)",
+      "white-space:nowrap",
+      "opacity:0",
+      "transition:opacity 380ms ease",
+    ].join(";");
+    document.body.appendChild(questTaglineEl);
+    return questTaglineEl;
+  }
+  function showQuestTagline(text, holdMs = 1800) {
+    const el = ensureQuestTagline();
+    el.textContent = text;
+    el.style.opacity = "1";
+    clearTimeout(showQuestTagline._t);
+    showQuestTagline._t = setTimeout(() => { el.style.opacity = "0"; }, holdMs);
+  }
+
+  // ── REWARDS ─────────────────────────────────────────────────────────
+  // Each is unique and small. Sound rewards bypass soundOn gate so the
+  // cheering moment lands even on first interaction.
+  function rewardFourOnFloor() {
+    showQuestTagline("FEEL THE PULSE");
+    if (Tone) {
+      try {
+        ensureVoices();
+        const t = Tone.now();
+        // Three quick "yeah!" pluck triplets with rising pitch.
+        const notes = ["A4", "C5", "E5", "A5"];
+        notes.forEach((n, i) => pluck(n, t + i * 0.08, 0.7));
+        // Bright noise burst tail like a crowd cheer.
+        if (voices && voices.snare) {
+          for (let i = 0; i < 6; i++) {
+            try { voices.snare.triggerAttackRelease("32n", t + 0.36 + i * 0.04, 0.45); } catch {}
+          }
+        }
+      } catch {}
+    }
+  }
+  function rewardSilence() {
+    // No tagline — silence is its own reward. 3-note ascending chord that
+    // lingers, then fades. Plays even with sound off so the moment lands.
+    if (Tone) {
+      try {
+        const t = Tone.now();
+        pluck("C4", t + 0.00, 0.55);
+        pluck("E4", t + 0.16, 0.55);
+        pluck("G4", t + 0.32, 0.55);
+      } catch {}
+    }
+    showQuestTagline("EMPTY ROOM, FULL HEART", 2400);
+  }
+  function rewardRideHat() {
+    // White flash overlay across the viewport, then fade.
+    const flash = document.createElement("div");
+    flash.style.cssText = [
+      "position:fixed", "inset:0", "z-index:40",
+      "background:#ffffff", "opacity:0", "pointer-events:none",
+      "mix-blend-mode:screen",
+    ].join(";");
+    document.body.appendChild(flash);
+    if (window.gsap) {
+      gsap.to(flash, { opacity: 0.85, duration: 0.08, ease: "power1.out" });
+      gsap.to(flash, { opacity: 0, duration: 0.6, delay: 0.1, ease: "power2.out", onComplete: () => flash.remove() });
+    } else {
+      flash.style.opacity = "0.85";
+      setTimeout(() => { flash.style.opacity = "0"; flash.style.transition = "opacity 600ms ease"; }, 80);
+      setTimeout(() => flash.remove(), 800);
+    }
+    showQuestTagline("RIDING THE WAVE");
+  }
+  function rewardGroove() {
+    // Full chord — root + third + fifth + octave on the lead voice.
+    if (Tone) {
+      try {
+        ensureVoices();
+        const t = Tone.now();
+        ["A3", "C4", "E4", "A4"].forEach((n, i) => pluck(n, t + i * 0.02, 0.65));
+      } catch {}
+    }
+    showQuestTagline("THE GROOVE IS REAL");
+  }
+  function rewardOffGrid() {
+    // Psychedelic burst: brief hue-rotate sweep on the entire stage,
+    // plus a random pluck arpeggio in the upper register.
+    const stage = document.querySelector(".stage") || document.body;
+    if (window.gsap) {
+      gsap.fromTo(stage,
+        { filter: "hue-rotate(0deg) saturate(1)" },
+        { filter: "hue-rotate(220deg) saturate(1.6)", duration: 0.45, ease: "power1.inOut" }
+      );
+      gsap.to(stage, { filter: "hue-rotate(0deg) saturate(1)", duration: 0.9, delay: 0.45, ease: "power2.out" });
+    }
+    if (Tone) {
+      try {
+        ensureVoices();
+        const t = Tone.now();
+        const pool = ["C5", "D5", "E5", "G5", "A5", "C6", "E6"];
+        for (let i = 0; i < 7; i++) {
+          const n = pool[(Math.random() * pool.length) | 0];
+          pluck(n, t + i * 0.06, 0.5);
+        }
+      } catch {}
+    }
+    showQuestTagline("OFF THE GRID");
+  }
+
+  // ── PANEL ───────────────────────────────────────────────────────────
+  // Glassy floating panel. Toggled with `q`. Lists each quest with a
+  // status dot and a (faded) hint line.
+  if (!document.getElementById("quests-style")) {
+    const qs = document.createElement("style");
+    qs.id = "quests-style";
+    qs.textContent = `
+      .quests-panel {
+        position: fixed;
+        top: 50%;
+        right: 24px;
+        transform: translateY(-50%) translateX(12px);
+        z-index: 32;
+        width: clamp(260px, 28vw, 340px);
+        background: rgba(10, 10, 10, 0.62);
+        backdrop-filter: blur(14px) saturate(1.2);
+        -webkit-backdrop-filter: blur(14px) saturate(1.2);
+        border: 1px solid rgba(240, 215, 42, 0.22);
+        border-radius: 14px;
+        padding: 18px 18px 16px;
+        font: 500 12px/1.4 var(--mono, ui-monospace, "JetBrains Mono", monospace);
+        color: rgba(240, 215, 42, 0.92);
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity 220ms ease, transform 280ms cubic-bezier(.2,.8,.2,1);
+      }
+      .quests-panel.open {
+        opacity: 1;
+        pointer-events: auto;
+        transform: translateY(-50%) translateX(0);
+      }
+      .quests-panel .qp-head {
+        display: flex; align-items: baseline; justify-content: space-between;
+        text-transform: uppercase;
+        letter-spacing: 0.18em;
+        font-size: 10px;
+        color: rgba(240, 215, 42, 0.62);
+        margin-bottom: 12px;
+      }
+      .quests-panel .qp-list {
+        list-style: none;
+        margin: 0; padding: 0;
+        display: grid; gap: 10px;
+      }
+      .quests-panel .qp-item {
+        display: grid;
+        grid-template-columns: 14px 1fr;
+        gap: 10px;
+        align-items: start;
+      }
+      .quests-panel .qp-dot {
+        width: 10px; height: 10px;
+        margin-top: 4px;
+        border-radius: 50%;
+        border: 1.5px solid rgba(240, 215, 42, 0.55);
+        background: transparent;
+        transition: background 240ms ease, border-color 240ms ease;
+      }
+      .quests-panel .qp-item.done .qp-dot {
+        background: var(--y, #f0d72a);
+        border-color: var(--y, #f0d72a);
+      }
+      .quests-panel .qp-title {
+        font-size: 12px;
+        letter-spacing: 0.04em;
+      }
+      .quests-panel .qp-item.done .qp-title {
+        color: rgba(240, 215, 42, 0.55);
+        text-decoration: line-through;
+        text-decoration-thickness: 1px;
+      }
+      .quests-panel .qp-hint {
+        margin-top: 3px;
+        font-size: 10.5px;
+        letter-spacing: 0.02em;
+        color: rgba(240, 215, 42, 0.5);
+      }
+      .quests-panel .qp-foot {
+        margin-top: 14px;
+        font-size: 10px;
+        letter-spacing: 0.16em;
+        text-transform: uppercase;
+        color: rgba(240, 215, 42, 0.42);
+        text-align: right;
+      }
+    `;
+    document.head.appendChild(qs);
+  }
+
+  let questsPanelEl = null;
+  function buildQuestsPanel() {
+    if (questsPanelEl) return questsPanelEl;
+    const el = document.createElement("aside");
+    el.className = "quests-panel";
+    el.setAttribute("role", "dialog");
+    el.setAttribute("aria-label", "Quests");
+    el.setAttribute("aria-hidden", "true");
+    const head = document.createElement("div");
+    head.className = "qp-head";
+    const t = document.createElement("span");
+    t.textContent = "Quests";
+    const c = document.createElement("span");
+    c.className = "qp-count";
+    c.textContent = `${questsDone.size}/${QUESTS.length}`;
+    head.appendChild(t);
+    head.appendChild(c);
+    el.appendChild(head);
+    const list = document.createElement("ul");
+    list.className = "qp-list";
+    QUESTS.forEach((q) => {
+      const li = document.createElement("li");
+      li.className = "qp-item";
+      li.dataset.qid = q.id;
+      const dot = document.createElement("span");
+      dot.className = "qp-dot";
+      const body = document.createElement("div");
+      const title = document.createElement("div");
+      title.className = "qp-title";
+      title.textContent = q.title;
+      const hint = document.createElement("div");
+      hint.className = "qp-hint";
+      hint.textContent = q.hint;
+      body.appendChild(title);
+      body.appendChild(hint);
+      li.appendChild(dot);
+      li.appendChild(body);
+      list.appendChild(li);
+    });
+    el.appendChild(list);
+    const foot = document.createElement("div");
+    foot.className = "qp-foot";
+    foot.textContent = "press q to close";
+    el.appendChild(foot);
+    document.body.appendChild(el);
+    questsPanelEl = el;
+    renderQuestsPanel();
+    return el;
+  }
+  function renderQuestsPanel() {
+    if (!questsPanelEl) return;
+    const count = questsPanelEl.querySelector(".qp-count");
+    if (count) count.textContent = `${questsDone.size}/${QUESTS.length}`;
+    questsPanelEl.querySelectorAll(".qp-item").forEach((li) => {
+      const id = li.dataset.qid;
+      li.classList.toggle("done", questsDone.has(id));
+    });
+  }
+  function openQuestsPanel() {
+    const el = buildQuestsPanel();
+    renderQuestsPanel();
+    el.classList.add("open");
+    el.setAttribute("aria-hidden", "false");
+  }
+  function closeQuestsPanel() {
+    if (!questsPanelEl) return;
+    questsPanelEl.classList.remove("open");
+    questsPanelEl.setAttribute("aria-hidden", "true");
+  }
+  function toggleQuestsPanel() {
+    if (questsPanelEl && questsPanelEl.classList.contains("open")) closeQuestsPanel();
+    else openQuestsPanel();
+  }
+
+  // ── CHECK ──────────────────────────────────────────────────────────
+  // Called after every grid mutation. Fires reward + persists on the
+  // rising edge of a quest's predicate (false → true). Each quest's
+  // reward fires at most once per session; the next session resets the
+  // "fired" flag so re-completing replays the moment.
+  const lastQuestState = new Map(); // id -> last predicate value
+  function checkQuests() {
+    let dirty = false;
+    for (const q of QUESTS) {
+      let passed = false;
+      try { passed = !!q.check(); } catch { passed = false; }
+      const prev = lastQuestState.get(q.id) || false;
+      lastQuestState.set(q.id, passed);
+      if (!passed) continue;
+      // Rising edge only — and only once per session.
+      if (prev) continue;
+      if (sessionFired.has(q.id)) {
+        if (!questsDone.has(q.id)) { questsDone.add(q.id); dirty = true; }
+        continue;
+      }
+      sessionFired.add(q.id);
+      if (!questsDone.has(q.id)) { questsDone.add(q.id); dirty = true; }
+      else dirty = true; // re-completion across sessions still re-renders the count
+      try { q.reward(); } catch {}
+    }
+    if (dirty) {
+      saveQuestsDone();
+      renderQuestsPanel();
+    }
+  }
+
+  // `q` toggles the panel. Bare key only, not while typing.
+  window.addEventListener("keydown", (e) => {
+    if (e.defaultPrevented) return;
+    const tag = (e.target && e.target.tagName) || "";
+    if (tag === "INPUT" || tag === "TEXTAREA" || (e.target && e.target.isContentEditable)) return;
+    if (e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return;
+    if (e.key === "q" || e.key === "Q") {
+      toggleQuestsPanel();
+      return;
+    }
+    if (e.key === "Escape" && questsPanelEl && questsPanelEl.classList.contains("open")) {
+      closeQuestsPanel();
+    }
+  });
+
+  // Seed the rising-edge map with the current state so initial passes
+  // (e.g. empty grid satisfies "find-silence") don't fire on page load.
+  for (const q of QUESTS) {
+    try { lastQuestState.set(q.id, !!q.check()); } catch { lastQuestState.set(q.id, false); }
+  }
 
   // ── CLEANUP ──
   const onPageHide = () => {
