@@ -392,6 +392,37 @@ export function initMotion(gsap) {
     gsap.from(".cta, .corner, .sound", { opacity: 0, y: 8, duration: 1.0, stagger: 0.1, ease: "expo.out", delay: 1.0 });
   }
 
+  // ── MAGNETIC LETTERS: each letter subtly attracts toward the cursor. ──
+  // Cached letter centers (screen coordinates), refreshed after entrance
+  // settles and on resize. Per-letter quickTo for x/y so magnetic motion
+  // composes with the parent .hero rotation parallax (separate elements)
+  // and with the click bow (which uses yPercent, not y/x).
+  const MAG_RADIUS = 120;
+  const MAG_MAX = 14;
+  const letterTo = letters.map((l) => ({
+    x: gsap.quickTo(l, "x", { duration: 0.6, ease: "power3.out" }),
+    y: gsap.quickTo(l, "y", { duration: 0.6, ease: "power3.out" }),
+  }));
+  let letterCenters = [];
+  function cacheLetterCenters() {
+    letterCenters = letters.map((l) => {
+      const r = l.getBoundingClientRect();
+      return { cx: r.left + r.width / 2, cy: r.top + r.height / 2 };
+    });
+  }
+  // Cache after the entrance animation has fully settled. Last letter
+  // starts at delay 0.1 + (letters.length - 1) * 0.09, runs 1.6s.
+  const entranceSettleMs = reduced
+    ? 0
+    : (0.1 + Math.max(0, letters.length - 1) * 0.09 + 1.6) * 1000 + 100;
+  const cacheTimer = setTimeout(cacheLetterCenters, entranceSettleMs);
+  // Initial cheap cache so it works even before settle (in case the user
+  // mouses in early). Letters are off-screen during entrance, so distances
+  // will exceed MAG_RADIUS until they arrive — graceful no-op.
+  cacheLetterCenters();
+  const onMagResize = () => cacheLetterCenters();
+  window.addEventListener("resize", onMagResize);
+
   // ── CURSOR + WEIGHTY HERO PARALLAX ──
   if (!reduced && halo && dot) {
     const haloX = gsap.quickTo(halo, "x", { duration: 0.55, ease: "power3.out" });
@@ -423,6 +454,23 @@ export function initMotion(gsap) {
       heroRotX(-ny * 5);
       backX(nx * 32); backY(ny * 18);
       midX(nx * -8); midY(ny * -4);
+
+      // Magnetic letters — each letter is "aware" of nearby cursor.
+      for (let i = 0; i < letterCenters.length; i++) {
+        const c = letterCenters[i];
+        const dx = e.clientX - c.cx;
+        const dy = e.clientY - c.cy;
+        const dist = Math.hypot(dx, dy);
+        if (dist < MAG_RADIUS) {
+          const k = (1 - dist / MAG_RADIUS) * MAG_MAX;
+          const norm = dist === 0 ? 0 : 1 / dist;
+          letterTo[i].x(dx * norm * k);
+          letterTo[i].y(dy * norm * k);
+        } else {
+          letterTo[i].x(0);
+          letterTo[i].y(0);
+        }
+      }
     }, { passive: true });
 
     document.querySelectorAll(".cta, .corner a, .sound").forEach((el) => {
@@ -481,16 +529,19 @@ export function initMotion(gsap) {
     }
 
     // Letters bow toward the click — tiny tilt that decays.
+    // Uses yPercent so it composes with magnetic x/y (px) on the same letter.
+    // Scaled down vs original px: ~1/2 since letters are large (yPercent is
+    // % of the letter's own bbox height).
     if (!reduced) {
       letters.forEach((l, i) => {
         const lx = (i + 0.5) / letters.length;
         const dist = Math.abs(lx - nx);
-        const push = (1 - Math.min(1, dist * 2.5)) * (isSelf ? 14 : 8);
+        const push = (1 - Math.min(1, dist * 2.5)) * (isSelf ? 7 : 4);
         gsap.fromTo(l,
-          { y: 0 },
-          { y: -push, duration: 0.18, ease: "power2.out", overwrite: "auto" }
+          { yPercent: 0 },
+          { yPercent: -push, duration: 0.18, ease: "power2.out", overwrite: false }
         );
-        gsap.to(l, { y: 0, duration: 1.2, ease: "elastic.out(1, 0.6)", delay: 0.18, overwrite: "auto" });
+        gsap.to(l, { yPercent: 0, duration: 1.2, ease: "elastic.out(1, 0.6)", delay: 0.18, overwrite: false });
       });
     }
 
@@ -595,6 +646,8 @@ export function initMotion(gsap) {
   // ── CLEANUP ──
   const onPageHide = () => {
     clearInterval(pollInterval);
+    clearTimeout(cacheTimer);
+    window.removeEventListener("resize", onMagResize);
     if (fieldHandle) fieldHandle.destroy();
     if (starsHandle) starsHandle.destroy();
     if (ripplesHandle) ripplesHandle.destroy();
@@ -605,6 +658,8 @@ export function initMotion(gsap) {
   return {
     destroy: () => {
       clearInterval(pollInterval);
+      clearTimeout(cacheTimer);
+      window.removeEventListener("resize", onMagResize);
       if (fieldHandle) fieldHandle.destroy();
       if (starsHandle) starsHandle.destroy();
       if (ripplesHandle) ripplesHandle.destroy();
