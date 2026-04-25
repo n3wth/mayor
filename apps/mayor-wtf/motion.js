@@ -174,7 +174,9 @@ function initField(canvas) {
 // ── PRESENCE STARS ───────────────────────────────────────────────────────
 // One soft point of light per visitor (excluding self). Drifts gently.
 // Stars are just dots with motion; their VALUE is "you can see other minds."
-function initStars(canvas) {
+// Also: occasional shooting stars streak diagonally — a quiet wonder, with
+// a soft bell when sound is on.
+function initStars(canvas, getSoundOn) {
   const ctx = canvas.getContext("2d");
   if (!ctx) return null;
   let dpr = Math.min(2, window.devicePixelRatio || 1);
@@ -194,9 +196,92 @@ function initStars(canvas) {
   let paused = false;
   document.addEventListener("visibilitychange", () => { paused = document.hidden; });
 
+  // Shooting stars — short-lived diagonal streaks. Spawned every 8–14s.
+  // Each carries a small head and a fading trail (~80px in CSS pixels).
+  const shooters = [];
+  let nextShootAt = performance.now() + (8000 + Math.random() * 6000);
+  const TRAIL_LEN = 80; // CSS px
+  const LIFE = 1.1;     // seconds, head travels full path
+
+  function spawnShooter() {
+    // Diagonal: top-left → bottom-right or top-right → bottom-left.
+    const fromLeft = Math.random() < 0.5;
+    // Start above the visible area, end below — a generous arc across.
+    const startX = fromLeft
+      ? (-0.05 + Math.random() * 0.25) * W
+      : (0.80 + Math.random() * 0.25) * W;
+    const startY = (-0.10 + Math.random() * 0.20) * H;
+    // Travel a generous diagonal, angled ~22–38° below horizontal.
+    const theta = (Math.PI / 180) * (22 + Math.random() * 16);
+    const dist = (0.65 + Math.random() * 0.25) * Math.hypot(W, H);
+    const dirX = fromLeft ? 1 : -1;
+    const vx = dirX * Math.cos(theta) * dist;
+    const vy = Math.sin(theta) * dist;
+    shooters.push({
+      x0: startX,
+      y0: startY,
+      vx,
+      vy,
+      t0: performance.now(),
+    });
+    // Soft bell — high octave from PENT[12-15].
+    if (getSoundOn && getSoundOn()) {
+      const note = PENT[12 + ((Math.random() * 4) | 0)];
+      pluck(note, 0, 0.4);
+    }
+  }
+
+  function drawShooter(s, now) {
+    const age = (now - s.t0) / 1000;
+    if (age > LIFE) return false;
+    const p = age / LIFE;
+    // Ease-out so the streak feels like it's gliding to a stop.
+    const eased = 1 - Math.pow(1 - p, 2.2);
+    const hx = s.x0 + s.vx * eased;
+    const hy = s.y0 + s.vy * eased;
+    // Trail tail point — fixed CSS-px length behind the head along velocity.
+    const speedLen = Math.hypot(s.vx, s.vy) || 1;
+    const ux = s.vx / speedLen;
+    const uy = s.vy / speedLen;
+    const trail = TRAIL_LEN * dpr;
+    const tx = hx - ux * trail;
+    const ty = hy - uy * trail;
+
+    // Fade in fast, hold, fade out — bell-shaped alpha so it feels gentle.
+    const alpha = Math.min(1, p * 4) * Math.min(1, (1 - p) * 2.4);
+
+    // Trail: linear gradient from transparent at tail to bright at head.
+    const grad = ctx.createLinearGradient(tx, ty, hx, hy);
+    grad.addColorStop(0, "rgba(255, 220, 100, 0)");
+    grad.addColorStop(1, `rgba(255, 235, 150, ${0.85 * alpha})`);
+    ctx.strokeStyle = grad;
+    ctx.lineWidth = 1.6 * dpr;
+    ctx.lineCap = "round";
+    ctx.beginPath();
+    ctx.moveTo(tx, ty);
+    ctx.lineTo(hx, hy);
+    ctx.stroke();
+
+    // Bright head — small glow + tight core.
+    const head = ctx.createRadialGradient(hx, hy, 0, hx, hy, 6 * dpr);
+    head.addColorStop(0, `rgba(255, 245, 200, ${0.95 * alpha})`);
+    head.addColorStop(1, "rgba(255, 220, 100, 0)");
+    ctx.fillStyle = head;
+    ctx.beginPath();
+    ctx.arc(hx, hy, 6 * dpr, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.fillStyle = `rgba(255, 250, 220, ${alpha})`;
+    ctx.beginPath();
+    ctx.arc(hx, hy, 1.6 * dpr, 0, Math.PI * 2);
+    ctx.fill();
+    return true;
+  }
+
   function tick() {
     if (!paused) {
       const t = performance.now() / 1000;
+      const now = performance.now();
       ctx.clearRect(0, 0, W, H);
       // i=0 is self, hidden. Render i=1..count-1.
       for (let i = 1; i < count; i++) {
@@ -222,6 +307,20 @@ function initStars(canvas) {
         ctx.arc(cx, cy, 2 * dpr, 0, Math.PI * 2);
         ctx.fill();
       }
+
+      // Shooting stars — schedule + render.
+      if (now >= nextShootAt) {
+        spawnShooter();
+        nextShootAt = now + (8000 + Math.random() * 6000);
+      }
+      for (let i = shooters.length - 1; i >= 0; i--) {
+        const alive = drawShooter(shooters[i], now);
+        if (!alive) shooters.splice(i, 1);
+      }
+    } else {
+      // While hidden, push the next spawn into the future so we don't burst
+      // a stockpile of streaks the moment the tab regains focus.
+      nextShootAt = performance.now() + (8000 + Math.random() * 6000);
     }
     raf = requestAnimationFrame(tick);
   }
@@ -373,10 +472,14 @@ export function initMotion(gsap) {
     l.style.transformOrigin = "center bottom";
   });
 
+  // Forward-reference: shooting stars need to know if sound is on. soundOn
+  // is declared further down; the getter reads it lazily each spawn.
+  let soundOn = false;
+
   let fieldHandle = null, starsHandle = null, ripplesHandle = null;
   if (!reduced) {
     fieldHandle = initField(fieldCanvas);
-    starsHandle = initStars(starsCanvas);
+    starsHandle = initStars(starsCanvas, () => soundOn);
     ripplesHandle = initRipples(ripplesCanvas);
   }
 
@@ -432,7 +535,6 @@ export function initMotion(gsap) {
   }
 
   // ── SOUND: continuous drone + per-click plucks ──
-  let soundOn = false;
   function toggleSound(forceOn) {
     const want = forceOn === undefined ? !soundOn : !!forceOn;
     if (want && !audioReady) {
