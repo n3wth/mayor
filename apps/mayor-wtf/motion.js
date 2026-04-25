@@ -213,7 +213,7 @@ function initField(canvas) {
 // Stars are just dots with motion; their VALUE is "you can see other minds."
 // Also: occasional shooting stars streak diagonally — a quiet wonder, with
 // a soft bell when sound is on.
-function initStars(canvas, getSoundOn) {
+function initStars(canvas, getSoundOn, getSingingCount) {
   const ctx = canvas.getContext("2d");
   if (!ctx) return null;
   let dpr = Math.min(2, window.devicePixelRatio || 1);
@@ -232,6 +232,16 @@ function initStars(canvas, getSoundOn) {
   let raf = 0;
   let paused = false;
   document.addEventListener("visibilitychange", () => { paused = document.hidden; });
+  // How many peers are currently "singing" (held tones active).
+  // Stars at indices 1..singCount get a slightly larger/brighter render
+  // so the chord is something you can both hear and see.
+  const singing = () => {
+    if (typeof getSingingCount === "function") {
+      const n = getSingingCount() | 0;
+      return Math.max(0, Math.min(count - 1, n));
+    }
+    return 0;
+  };
 
   // Shooting stars — short-lived diagonal streaks. Spawned every 8–14s.
   // Each carries a small head and a fading trail (~80px in CSS pixels).
@@ -321,27 +331,34 @@ function initStars(canvas, getSoundOn) {
       const now = performance.now();
       ctx.clearRect(0, 0, W, H);
       // i=0 is self, hidden. Render i=1..count-1.
+      const sing = singing();
       for (let i = 1; i < count; i++) {
         // Stable drift — each visitor has unique slow elliptical orbit.
         const seed = i * 13.37;
         const cx = W * (0.5 + 0.32 * Math.sin(t * 0.06 + seed));
         const cy = H * (0.5 + 0.22 * Math.cos(t * 0.07 + seed * 1.3));
-        const r = (10 + Math.sin(t * 0.5 + seed) * 4) * dpr;
+        // Sounding peers swell ~25% larger and gain a brighter core, so
+        // the chord is visible as well as audible.
+        const isSinging = i <= sing;
+        const sizeMul = isSinging ? 1.25 : 1.0;
+        const r = (10 + Math.sin(t * 0.5 + seed) * 4) * dpr * sizeMul;
 
         // Soft yellow glow
         const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, r * 6);
-        grad.addColorStop(0, "rgba(255, 220, 80, 0.55)");
-        grad.addColorStop(0.4, "rgba(255, 200, 60, 0.18)");
+        const glowAlpha = isSinging ? 0.75 : 0.55;
+        const midAlpha = isSinging ? 0.26 : 0.18;
+        grad.addColorStop(0, `rgba(255, 220, 80, ${glowAlpha})`);
+        grad.addColorStop(0.4, `rgba(255, 200, 60, ${midAlpha})`);
         grad.addColorStop(1, "rgba(255, 200, 60, 0)");
         ctx.fillStyle = grad;
         ctx.beginPath();
         ctx.arc(cx, cy, r * 6, 0, Math.PI * 2);
         ctx.fill();
 
-        // Tight bright core
-        ctx.fillStyle = "rgba(255,240,160,0.95)";
+        // Tight bright core — singing stars get a hotter, slightly larger core.
+        ctx.fillStyle = isSinging ? "rgba(255,250,210,1)" : "rgba(255,240,160,0.95)";
         ctx.beginPath();
-        ctx.arc(cx, cy, 2 * dpr, 0, Math.PI * 2);
+        ctx.arc(cx, cy, (isSinging ? 2.6 : 2) * dpr, 0, Math.PI * 2);
         ctx.fill();
       }
 
@@ -604,6 +621,27 @@ let genLoop = null, bassLoop = null;
 let genActive = false;
 let presenceForGen = 1;
 
+// ── STARFIELD MUSIC ──
+// One held note per visitor. Peer index → chord-tone. As people arrive
+// the room literally sings; a held pentatonic chord forms from presence
+// alone. Long attack/release so notes fade in/out as visitors join/leave.
+const PEER_TONES = ["A3", "C4", "E4", "G4", "A4"];
+function peerTone(peerIdx) {
+  // peerIdx is 1-based (i=0 is self). Wrap by octave after 5 peers.
+  const n = Math.max(1, peerIdx | 0) - 1; // 0-based
+  const slot = n % PEER_TONES.length;
+  const oct = (n / PEER_TONES.length) | 0;
+  const base = PEER_TONES[slot];
+  if (oct === 0) return base;
+  // Bump octave digit by `oct`.
+  const m = base.match(/^([A-G]#?)(-?\d+)$/);
+  if (!m) return base;
+  return m[1] + (parseInt(m[2], 10) + oct);
+}
+let peerSynth = null;
+let peerNotes = []; // active held notes, indexed by peer index 1..N → notes[i-1]
+let peerSingCount = 0; // currently sounding peers (== peerNotes.length while soundOn)
+
 function initAudio() {
   if (audioReady) return true;
   Tone = window.Tone;
@@ -644,9 +682,53 @@ function initAudio() {
   }).connect(filter);
   leadSynth.volume.value = -14;
 
+  // Peer synth — each connected visitor holds a single pentatonic note.
+  // Long attack/release (3s) so arrivals/departures bloom and dissolve
+  // gently. Filtered + reverbed so the chord sits under everything.
+  const peerReverb = new Tone.Reverb({ decay: 6, wet: 0.5 }).toDestination();
+  const peerFilter = new Tone.Filter(2000, "lowpass").connect(peerReverb);
+  peerSynth = new Tone.PolySynth(Tone.Synth, {
+    oscillator: { type: "sine" },
+    envelope: { attack: 3, decay: 0.5, sustain: 1, release: 3 },
+  }).connect(peerFilter);
+  peerSynth.volume.value = -28;
+
   droneNodes = { padA, padE, filter, reverb, lfo };
   audioReady = true;
   return true;
+}
+
+// ── PEER VOICES ──
+// Sync the held-note chord to the current peer count. Peers leaving
+// release their notes; peers arriving attack a fresh tone. Each visitor
+// only sings while soundOn — silent users still see stars, just no notes.
+function setPeerSinging(n, soundOn) {
+  if (!peerSynth || !Tone) { peerSingCount = 0; return; }
+  const desired = soundOn ? Math.max(0, (n | 0) - 1) : 0; // exclude self
+  const now = Tone.now();
+  // Release any notes above the new desired count.
+  while (peerNotes.length > desired) {
+    const note = peerNotes.pop();
+    try { peerSynth.triggerRelease(note, now); } catch {}
+  }
+  // Attack new notes for arriving peers.
+  while (peerNotes.length < desired) {
+    const idx = peerNotes.length + 1; // peer index, 1-based
+    const note = peerTone(idx);
+    peerNotes.push(note);
+    try { peerSynth.triggerAttack(note, now); } catch {}
+  }
+  peerSingCount = peerNotes.length;
+}
+
+function silencePeers() {
+  if (!peerSynth || !Tone) { peerNotes = []; peerSingCount = 0; return; }
+  const now = Tone.now();
+  for (const note of peerNotes) {
+    try { peerSynth.triggerRelease(note, now); } catch {}
+  }
+  peerNotes = [];
+  peerSingCount = 0;
 }
 
 // Markov state for the lead — index into the current chord's scale.
@@ -755,7 +837,7 @@ export function initMotion(gsap) {
   let fieldHandle = null, starsHandle = null, auroraHandle = null, ripplesHandle = null, trailHandle = null;
   if (!reduced) {
     fieldHandle = initField(fieldCanvas);
-    starsHandle = initStars(starsCanvas, () => soundOn);
+    starsHandle = initStars(starsCanvas, () => soundOn, () => peerSingCount);
     auroraHandle = initAurora(auroraCanvas);
     trailHandle = initTrail(trailCanvas);
     ripplesHandle = initRipples(ripplesCanvas);
@@ -928,6 +1010,8 @@ export function initMotion(gsap) {
       Tone.start().then(() => {
         startDrone();
         startGenerative();
+        // Bring up the per-peer chord to match current presence.
+        setPeerSinging(presenceCount, true);
       }).catch(() => {});
     } else {
       stopGenerative();
@@ -936,6 +1020,8 @@ export function initMotion(gsap) {
         droneNodes.padE.stop();
         droneStarted = false;
       }
+      // Let every peer note fade out gracefully (3s release).
+      silencePeers();
     }
   }
   if (soundBtn) soundBtn.addEventListener("click", () => toggleSound());
@@ -1483,6 +1569,8 @@ export function initMotion(gsap) {
               presenceEl.textContent = n === 1 ? "alone in the room" : `${n} in the room`;
             }
             if (starsHandle) starsHandle.setCount(n);
+            // Each visitor sings a held note. Chord forms from presence.
+            setPeerSinging(n, soundOn);
             return;
           }
           // Grid snapshot — apply silently (no preview play).
