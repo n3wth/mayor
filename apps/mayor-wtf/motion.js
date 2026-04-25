@@ -2933,6 +2933,563 @@ export function initMotion(gsap) {
     }
   });
 
+  // ── STORY (6-act procedural narrative) ───────────────────────────────
+  // Press 's' — a 72-second story plays out in six 12-second acts. Each act
+  // has a typewriter paragraph, a chord, and a unique visual treatment.
+  // The narrative pulls from phrase banks keyed by:
+  //   - hour() % 4   (time-of-day mood: dawn / day / dusk / night)
+  //   - visit band   (under 60s "fresh" / under 5min "settled" / longer "deep")
+  //   - peer count   (alone / with one / a small choir / a crowd)
+  // Esc skips the story (or closes mid-act). Story is single-instance —
+  // re-pressing 's' while running is a no-op.
+  const STORY_ACT_MS = 12000;
+  const story = {
+    running: false,
+    actIdx: -1,
+    timers: [],
+    typeTimer: null,
+    overlay: null,
+    textEl: null,
+    capEl: null,
+    rafId: 0,
+    prevChord: null,
+    prevDimColors: null,
+    chosenLetterIdx: -1,
+    letterDimSnapshot: [],
+    taskDone: false,
+    initialCellCount: 0,
+    cleanups: [],
+    onSeqClickForTask: null,
+    sseHookForTask: null,
+    aboutEl: null,
+  };
+
+  function storyHourBand() { return new Date().getHours() % 4; }
+  function storyVisitBand() {
+    const dur = (performance.now() - visitStart) / 1000;
+    if (dur < 60) return 0;        // fresh
+    if (dur < 300) return 1;       // settled
+    return 2;                       // deep
+  }
+  function storyPeerBand() {
+    const n = Math.max(1, presenceCount | 0);
+    if (n <= 1) return 0;          // alone
+    if (n === 2) return 1;         // with one
+    if (n <= 4) return 2;          // small choir
+    return 3;                       // crowd
+  }
+  function storyPick(arr, h, v, p) {
+    // Deterministic-ish selection: combine the three bands into an index.
+    if (!arr || !arr.length) return "";
+    const i = ((h | 0) * 13 + (v | 0) * 5 + (p | 0) * 3) % arr.length;
+    return arr[i];
+  }
+  function storyOrdinal(n) {
+    const s = ["first", "second", "third", "fourth", "fifth", "sixth", "seventh", "eighth", "ninth"];
+    return s[Math.max(0, Math.min(s.length - 1, n - 1))] || (n + "th");
+  }
+  function storyPeerStarDescription() {
+    // Peer indices currently allocated — describe their star positions in
+    // literary terms (rough quadrants based on the orbital seed phase).
+    const idxs = Array.from(peerIndex.values()).filter((i) => i > 0).sort((a, b) => a - b);
+    if (!idxs.length) return null;
+    const t = performance.now() / 1000;
+    const names = [];
+    for (const i of idxs.slice(0, 4)) {
+      const seed = i * 13.37;
+      const sx = 0.5 + 0.32 * Math.sin(t * 0.06 + seed);
+      const sy = 0.5 + 0.22 * Math.cos(t * 0.07 + seed * 1.3);
+      const horiz = sx < 0.4 ? "to your left" : sx > 0.6 ? "to your right" : "straight ahead";
+      const vert = sy < 0.4 ? "high" : sy > 0.6 ? "low" : "even";
+      names.push(`${vert} ${horiz}`);
+    }
+    if (names.length === 1) return `one star, ${names[0]}`;
+    if (names.length === 2) return `two stars — ${names[0]}, ${names[1]}`;
+    return `${names.length} stars — ${names.slice(0, -1).join(", ")}, and ${names[names.length - 1]}`;
+  }
+
+  // Phrase banks. Each act gets multiple variants per band so the story
+  // shifts feel honest, not random. Variants are templated; %X tokens are
+  // filled at runtime (peer names, mood, letter, etc.).
+  const STORY_BANKS = {
+    arrival: [
+      // hour band 0..3: dawn / day / dusk / night
+      "It is early. The room has barely opened its eyes. You are standing at the threshold of a quiet cathedral, and the letter %L is the first thing to wake.",
+      "It is the middle of a long bright hour. You arrive without ceremony. The letter %L is already humming under its breath.",
+      "Something dims. The hour drops a shoulder. You step in and the letter %L tilts toward you, the way an old friend does.",
+      "It is late. The page is breathing slowly. The letter %L is the only one still awake, and it has been waiting for you.",
+    ],
+    office: [
+      "This is the mayor's office. The desk is older than the building. There is a window, but it does not open. There is a chair, but no one ever sits down.",
+      "The office is small and full of weather. Files have been stacked into something close to a city. A single yellow lamp carries the work.",
+      "You are in the mayor's office, where every decision is a sound. The walls keep score. The drone is the room's mind, thinking out loud.",
+      "Welcome to the mayor's office. There are no windows in here, only listenings. Each chord is a memo signed in ink the same color as the air.",
+    ],
+    others: {
+      alone: [
+        "There is no one else here. The starfield is yours alone. Your light spends itself unwitnessed, which is its own kind of music.",
+        "You are alone in the room tonight. The chord that is meant for company holds its breath. The page knows, and is gentle about it.",
+      ],
+      others: [
+        "You are not alone. %S You are part of a chord, even if no one named it that.",
+        "Look at the field — %S Each one is a person who came in for the same reason you did, and stayed.",
+        "The stars are people. %S A small congregation, mostly silent, mostly thinking.",
+      ],
+    },
+    groove: {
+      withMood: [
+        "The grid has been remembering something. The pattern feels %M — you have been hammering on the %L's %B beat for a while now, and the page has started leaning into it.",
+        "Listen to what you have built. The mood is %M. The %L row carries the long thought; the %B beat is where the room lands.",
+        "There is a groove in the floor. It feels %M today. The %B beat of %L is the sentence you keep finishing.",
+      ],
+      empty: [
+        "The grid is quiet. No one has set the room a beat tonight. The chord is descending now — a minor key that knows.",
+        "There is no pattern yet. The grid waits, polite, like an empty stage. The descent in the chord is the room saying go on.",
+      ],
+    },
+    task: [
+      "Now: do one thing. Add a single cell to the grid, or remove one. The story will hear it. Put a mark on the wall of this office before you go.",
+      "Before the story ends, leave one fingerprint. Add a beat, or take one away. The page is listening for the click.",
+      "Do this small thing: a single cell, on or off. One change. The room is waiting to feel it.",
+      "One gesture. Add or remove a single cell. The room cannot end without it.",
+    ],
+    release: [
+      "Thank you for being here.",
+      "Thank you. The room remembers.",
+      "Thank you for the mark. The story keeps going without you.",
+      "Thank you. The cathedral closes its eyes.",
+    ],
+  };
+
+  function storyEnsureStyle() {
+    if (document.getElementById("story-style")) return;
+    const s = document.createElement("style");
+    s.id = "story-style";
+    s.textContent = `
+      .story-overlay {
+        position: fixed; inset: 0; z-index: 9000;
+        background: rgba(4, 4, 6, 0.86);
+        display: flex; align-items: center; justify-content: center;
+        opacity: 0; transition: opacity 600ms ease;
+        pointer-events: auto;
+      }
+      .story-overlay.show { opacity: 1; }
+      .story-overlay .panel {
+        max-width: 720px;
+        width: calc(100% - 96px);
+        font-family: var(--mono, ui-monospace, monospace);
+        font-size: 14px;
+        line-height: 1.7;
+        color: #ffffff;
+        letter-spacing: 0.12em;
+        text-align: center;
+        padding: 24px 12px;
+      }
+      .story-overlay .text {
+        white-space: pre-wrap;
+        min-height: 12em;
+      }
+      .story-overlay .caret {
+        display: inline-block;
+        width: 0.55em;
+        background: rgba(255,255,255,0.85);
+        animation: story-caret 0.9s steps(2, end) infinite;
+        vertical-align: baseline;
+      }
+      @keyframes story-caret { 0%, 100% { opacity: 0.0; } 50% { opacity: 1; } }
+      .story-overlay .meta {
+        margin-top: 28px;
+        font-size: 10.5px;
+        letter-spacing: 0.28em;
+        text-transform: uppercase;
+        color: rgba(255,255,255,0.45);
+      }
+      .story-overlay .meta .skip { color: rgba(255,255,255,0.7); }
+    `;
+    document.head.appendChild(s);
+  }
+
+  function storyBuildOverlay() {
+    storyEnsureStyle();
+    const overlay = document.createElement("div");
+    overlay.className = "story-overlay";
+    overlay.setAttribute("role", "dialog");
+    overlay.setAttribute("aria-modal", "true");
+    overlay.setAttribute("aria-label", "Story");
+    const panel = document.createElement("div");
+    panel.className = "panel";
+    const text = document.createElement("p");
+    text.className = "text";
+    text.setAttribute("aria-live", "polite");
+    panel.appendChild(text);
+    const caret = document.createElement("span");
+    caret.className = "caret";
+    caret.style.height = "1em";
+    text.appendChild(caret);
+    const meta = document.createElement("div");
+    meta.className = "meta";
+    meta.innerHTML = '<span class="act"></span> &nbsp;·&nbsp; <span class="skip">esc to close</span>';
+    panel.appendChild(meta);
+    overlay.appendChild(panel);
+    document.body.appendChild(overlay);
+    return { overlay, text, caret, meta, panel };
+  }
+
+  function storyTypewriter(textEl, str, totalMs, onDone) {
+    // textEl currently contains a caret span; preserve it as the trailing
+    // child throughout the type. We mutate a leading text node before it.
+    const caret = textEl.querySelector(".caret");
+    let leading = textEl.firstChild;
+    if (!leading || leading === caret) {
+      leading = document.createTextNode("");
+      textEl.insertBefore(leading, caret);
+    }
+    leading.nodeValue = "";
+    const chars = Array.from(str);
+    if (!chars.length) { if (typeof onDone === "function") onDone(); return () => {}; }
+    const stepMs = Math.max(8, totalMs / chars.length);
+    let i = 0;
+    let cancelled = false;
+    function step() {
+      if (cancelled) return;
+      leading.nodeValue += chars[i++] || "";
+      if (i >= chars.length) {
+        if (typeof onDone === "function") onDone();
+        story.typeTimer = null;
+        return;
+      }
+      story.typeTimer = setTimeout(step, stepMs);
+    }
+    step();
+    return () => {
+      cancelled = true;
+      if (story.typeTimer) { clearTimeout(story.typeTimer); story.typeTimer = null; }
+      // Fill remaining text instantly so the act still feels complete.
+      leading.nodeValue = str;
+    };
+  }
+
+  // ── ACT VISUALS ──
+  function storyAct1Arrival() {
+    // Pick one MAYOR letter to remain bright; dim the rest.
+    if (!letters.length) return;
+    const idx = Math.floor(Math.random() * letters.length);
+    story.chosenLetterIdx = idx;
+    story.letterDimSnapshot = letters.map((l) => l.style.opacity || "");
+    letters.forEach((l, i) => {
+      gsap.to(l, { opacity: i === idx ? 1 : 0.18, duration: 1.6, ease: "power2.out" });
+    });
+    // Drone: nudge psy gently up — a soft entrance.
+    psyTarget = Math.min(1, (psyTarget || 0) + 0.18);
+    if (fieldHandle) fieldHandle.triggerPulse(0.5, 0.5);
+    if (soundOn) {
+      try { pluck("A2", 0, 0.45); pluck("E3", 0.35, 0.32); } catch {}
+    }
+  }
+  function storyAct2Office() {
+    // Full chord swell on Am. Aurora-like sweep via field chaos + letter inhale.
+    storyApplyChord("Am");
+    if (fieldHandle) fieldHandle.triggerChaos(0.35);
+    psyTarget = Math.min(1, (psyTarget || 0) + 0.25);
+    if (soundOn) {
+      // Pad swell — pluck the chord tones across two octaves.
+      try {
+        pluck("A2", 0, 0.5);
+        pluck("C3", 0.18, 0.4);
+        pluck("E3", 0.36, 0.4);
+        pluck("A3", 0.7, 0.45);
+        pluck("E4", 1.0, 0.35);
+      } catch {}
+    }
+    // Bring all letters back, a slow inhale.
+    letters.forEach((l, i) => {
+      gsap.to(l, { opacity: 1, duration: 1.6, ease: "power2.out", delay: i * 0.05 });
+    });
+  }
+  function storyAct3Others() {
+    // Presence chord — F. Bloom every visible peer star.
+    storyApplyChord("F");
+    if (fieldHandle) fieldHandle.triggerPulse(0.5, 0.5);
+    if (starsHandle && starsHandle.setBrightFor) {
+      const idxs = Array.from(peerIndex.values()).filter((i) => i > 0);
+      // Spread the bloom over ~3s so it reads as a sweep across the field.
+      idxs.forEach((i, k) => {
+        const id = setTimeout(() => {
+          if (starsHandle && starsHandle.setBrightFor) starsHandle.setBrightFor(i, 1);
+          // Soft bell on each.
+          if (soundOn) {
+            try { pluck(["F3", "A3", "C4", "E4"][k % 4], 0, 0.32); } catch {}
+          }
+        }, k * 220);
+        story.timers.push(id);
+      });
+    }
+  }
+  function storyAct4Groove() {
+    // Descending chord — G then back home. Letters tilt with the groove.
+    storyApplyChord("G");
+    if (fieldHandle) fieldHandle.triggerChaos(0.25);
+    if (soundOn) {
+      try {
+        pluck("G3", 0, 0.45);
+        pluck("E3", 0.35, 0.4);
+        pluck("D3", 0.7, 0.4);
+        pluck("A2", 1.1, 0.5);
+      } catch {}
+    }
+    // Slight letter sway — a small descending wave.
+    letters.forEach((l, i) => {
+      gsap.fromTo(l,
+        { yPercent: 0 },
+        { yPercent: -4 - i, duration: 0.55, ease: "power2.out", delay: i * 0.08 }
+      );
+      gsap.to(l, { yPercent: 0, duration: 1.2, ease: "elastic.out(1, 0.6)", delay: 0.55 + i * 0.08 });
+    });
+  }
+  function storyAct5Task() {
+    // C — bright, listening chord. Wait for a step toggle.
+    storyApplyChord("C");
+    story.taskDone = false;
+    story.initialCellCount = storyCellCount();
+    // Listen for any local step toggle (incl. peer toggles arriving over SSE).
+    const onSeqClick = (e) => {
+      if (e.target && e.target.classList && e.target.classList.contains("cell")) {
+        story.taskDone = true;
+      }
+    };
+    if (seqEl) {
+      seqEl.addEventListener("click", onSeqClick, true);
+      story.onSeqClickForTask = onSeqClick;
+    }
+    // Watchdog: if the count changes (peer change, etc.), mark done.
+    const id = setInterval(() => {
+      if (storyCellCount() !== story.initialCellCount) story.taskDone = true;
+    }, 250);
+    story.timers.push(id);
+    story.cleanups.push(() => clearInterval(id));
+  }
+  function storyAct6Release() {
+    // Resolve back to Am. Bloom letters briefly. The page exhales.
+    storyApplyChord("Am");
+    psyTarget = Math.min(1, (psyTarget || 0) + 0.4);
+    if (fieldHandle) fieldHandle.triggerChaos(0.7);
+    letters.forEach((l, i) => {
+      gsap.fromTo(l,
+        { scale: 1 },
+        { scale: 1.18, duration: 0.5, ease: "power2.out", delay: i * 0.06 }
+      );
+      gsap.to(l, { scale: 1, duration: 1.4, ease: "elastic.out(1, 0.55)", delay: 0.5 + i * 0.06 });
+      gsap.to(l, { opacity: 1, duration: 0.6, ease: "power2.out" });
+    });
+    if (soundOn) {
+      try {
+        // A gentle Am chord — top to bottom.
+        pluck("A4", 0, 0.45);
+        pluck("E4", 0.10, 0.4);
+        pluck("C4", 0.20, 0.4);
+        pluck("A3", 0.45, 0.5);
+      } catch {}
+    }
+  }
+
+  function storyApplyChord(name) {
+    if (!Object.prototype.hasOwnProperty.call(CHORD_INDEX_BY_ROOT, name)) return;
+    if (story.prevChord == null) story.prevChord = currentChordName || "Am";
+    applyChord(name);
+    currentChordName = name;
+    renderChordWheelState();
+  }
+
+  function storyCellCount() {
+    let n = 0;
+    for (const L of SEQ_LETTERS) {
+      const row = seqGrid[L];
+      if (!row) continue;
+      for (let i = 0; i < SEQ_STEPS; i++) if (row[i]) n++;
+    }
+    return n;
+  }
+
+  function storyHideChrome(hide) {
+    // Soften UI chrome while the story plays so the overlay reads cleanly.
+    const sel = ".cta, .corner, .sound, [data-seq], .chord-wheel, .mood";
+    document.querySelectorAll(sel).forEach((el) => {
+      gsap.to(el, { opacity: hide ? 0 : 1, duration: hide ? 0.5 : 0.7, ease: "power2.inOut", overwrite: "auto" });
+    });
+  }
+
+  function storyComposeAct(actIdx) {
+    const h = storyHourBand();
+    const v = storyVisitBand();
+    const p = storyPeerBand();
+    const banks = STORY_BANKS;
+    if (actIdx === 0) {
+      const L = letters[story.chosenLetterIdx]?.dataset?.letter || "M";
+      return storyPick(banks.arrival, h, v, p).replace("%L", L);
+    }
+    if (actIdx === 1) return storyPick(banks.office, h, v, p);
+    if (actIdx === 2) {
+      const desc = storyPeerStarDescription();
+      const variants = (presenceCount > 1 && desc) ? banks.others.others : banks.others.alone;
+      return storyPick(variants, h, v, p).replace("%S", desc || "");
+    }
+    if (actIdx === 3) {
+      // If the mood-prophet exists (seqEl present) and there's any pattern, use the rich variant.
+      const haveMood = !!seqEl && !!moodEl && storyCellCount() > 0;
+      if (!haveMood) return storyPick(banks.groove.empty, h, v, p);
+      const mood = lastMood || (typeof computeMood === "function" ? computeMood() : "becoming");
+      // Pick the densest letter row + the most common beat-position within it.
+      let bestL = "M", bestCount = -1;
+      for (const L of SEQ_LETTERS) {
+        const row = seqGrid[L] || [];
+        let c = 0;
+        for (let i = 0; i < SEQ_STEPS; i++) if (row[i]) c++;
+        if (c > bestCount) { bestCount = c; bestL = L; }
+      }
+      // Find the most-used beat slot (0..3 within each group of 4) in bestL.
+      const beatBuckets = [0, 0, 0, 0];
+      const rowBest = seqGrid[bestL] || [];
+      for (let i = 0; i < SEQ_STEPS; i++) if (rowBest[i]) beatBuckets[i % 4]++;
+      let bestBeat = 0;
+      for (let b = 1; b < 4; b++) if (beatBuckets[b] > beatBuckets[bestBeat]) bestBeat = b;
+      return storyPick(banks.groove.withMood, h, v, p)
+        .replace("%M", mood)
+        .replace("%L", bestL)
+        .replace(/%B/g, storyOrdinal(bestBeat + 1));
+    }
+    if (actIdx === 4) return storyPick(banks.task, h, v, p);
+    if (actIdx === 5) return storyPick(banks.release, h, v, p);
+    return "";
+  }
+
+  function storyRunAct(actIdx) {
+    if (!story.running) return;
+    story.actIdx = actIdx;
+    if (story.overlay) {
+      const meta = story.overlay.querySelector(".meta .act");
+      if (meta) meta.textContent = `act ${actIdx + 1} of 6`;
+    }
+    // Visual treatment for this act.
+    try {
+      if (actIdx === 0) storyAct1Arrival();
+      else if (actIdx === 1) storyAct2Office();
+      else if (actIdx === 2) storyAct3Others();
+      else if (actIdx === 3) storyAct4Groove();
+      else if (actIdx === 4) storyAct5Task();
+      else if (actIdx === 5) storyAct6Release();
+    } catch {}
+
+    // Compose + type the paragraph. Reserve ~9s of the 12s for typing so
+    // the reader has a beat at the end of each act before the cut.
+    const paragraph = storyComposeAct(actIdx);
+    if (story.textEl) {
+      // Reset text content, keep caret as last child.
+      const caret = story.textEl.querySelector(".caret");
+      // Clear everything except caret.
+      const toRemove = [];
+      story.textEl.childNodes.forEach((n) => { if (n !== caret) toRemove.push(n); });
+      toRemove.forEach((n) => n.parentNode && n.parentNode.removeChild(n));
+      storyTypewriter(story.textEl, paragraph, 8800);
+    }
+
+    // Schedule next act, unless this was the final.
+    if (actIdx < 5) {
+      const id = setTimeout(() => storyRunAct(actIdx + 1), STORY_ACT_MS);
+      story.timers.push(id);
+    } else {
+      const id = setTimeout(() => storyEnd(false), STORY_ACT_MS);
+      story.timers.push(id);
+    }
+  }
+
+  function storyStart() {
+    if (story.running) return;
+    if (reduced) return; // No story under reduced motion.
+    story.running = true;
+    story.actIdx = -1;
+    story.timers = [];
+    story.cleanups = [];
+    story.taskDone = false;
+    story.prevChord = currentChordName || "Am";
+    story.letterDimSnapshot = letters.map((l) => l.style.opacity || "");
+    const built = storyBuildOverlay();
+    story.overlay = built.overlay;
+    story.textEl = built.text;
+    story.capEl = built.caret;
+    storyHideChrome(true);
+    // Fade overlay in, then start act 1.
+    requestAnimationFrame(() => {
+      if (story.overlay) story.overlay.classList.add("show");
+    });
+    const id = setTimeout(() => storyRunAct(0), 600);
+    story.timers.push(id);
+  }
+
+  function storyEnd(skipped) {
+    if (!story.running) return;
+    story.running = false;
+    // Clear all pending timers (acts + watchdogs).
+    for (const id of story.timers) {
+      try { clearTimeout(id); clearInterval(id); } catch {}
+    }
+    story.timers = [];
+    if (story.typeTimer) { try { clearTimeout(story.typeTimer); } catch {} story.typeTimer = null; }
+    for (const fn of story.cleanups) { try { fn(); } catch {} }
+    story.cleanups = [];
+    if (story.onSeqClickForTask && seqEl) {
+      try { seqEl.removeEventListener("click", story.onSeqClickForTask, true); } catch {}
+      story.onSeqClickForTask = null;
+    }
+    // Restore letter opacities to whatever they were before.
+    letters.forEach((l, i) => {
+      const prev = story.letterDimSnapshot[i] || "";
+      gsap.to(l, { opacity: prev === "" ? 1 : (parseFloat(prev) || 1), duration: 0.6, ease: "power2.out" });
+    });
+    // Restore chord to whatever it was when the story started.
+    if (story.prevChord && Object.prototype.hasOwnProperty.call(CHORD_INDEX_BY_ROOT, story.prevChord)) {
+      applyChord(story.prevChord);
+      currentChordName = story.prevChord;
+      renderChordWheelState();
+    }
+    storyHideChrome(false);
+    // Fade overlay out and remove.
+    if (story.overlay) {
+      const o = story.overlay;
+      o.classList.remove("show");
+      const id = setTimeout(() => {
+        if (o && o.parentNode) o.parentNode.removeChild(o);
+      }, 700);
+      story.timers.push(id);
+    }
+    story.overlay = null;
+    story.textEl = null;
+    story.capEl = null;
+    story.actIdx = -1;
+    story.chosenLetterIdx = -1;
+    void skipped;
+  }
+
+  // 's' opens the story. Esc closes/skips it (intercepted while running).
+  // Capture phase so Esc reaches us before the galaxy/ghost handlers below.
+  window.addEventListener("keydown", (e) => {
+    if (e.defaultPrevented) return;
+    const tag = (e.target && e.target.tagName) || "";
+    if (tag === "INPUT" || tag === "TEXTAREA" || (e.target && e.target.isContentEditable)) return;
+    if (e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return;
+    if ((e.key === "s" || e.key === "S") && !story.running) {
+      storyStart();
+      e.preventDefault();
+      e.stopPropagation();
+      return;
+    }
+    if (e.key === "Escape" && story.running) {
+      storyEnd(true);
+      e.preventDefault();
+      e.stopPropagation();
+      return;
+    }
+  }, true);
+
   // ── CLEANUP ──
   const onPageHide = () => {
     clearInterval(pollInterval);
@@ -2944,6 +3501,7 @@ export function initMotion(gsap) {
     if (nightRaf) cancelAnimationFrame(nightRaf);
     if (ghostState.recordTimeout) clearTimeout(ghostState.recordTimeout);
     cancelGhostPlayback();
+    if (story.running) storyEnd(true);
     if (fieldHandle) fieldHandle.destroy();
     if (starsHandle) starsHandle.destroy();
     if (auroraHandle) auroraHandle.destroy();
@@ -2966,6 +3524,7 @@ export function initMotion(gsap) {
       if (nightRaf) cancelAnimationFrame(nightRaf);
       if (ghostState.recordTimeout) clearTimeout(ghostState.recordTimeout);
       cancelGhostPlayback();
+      if (story.running) storyEnd(true);
       if (fieldHandle) fieldHandle.destroy();
       if (starsHandle) starsHandle.destroy();
       if (auroraHandle) auroraHandle.destroy();
