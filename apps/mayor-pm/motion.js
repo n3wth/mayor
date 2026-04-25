@@ -424,6 +424,66 @@ export function initMotion(gsap) {
     }
 
     setHeartbeat(s.active_sessions || 0);
+
+    // ── PAGE-LEVEL MORPH ───────────────────────────────
+    // As the Mayor gets busier, the whole composition shifts. Driven by an
+    // intensity score 0..1 that combines pulse, active sessions, and freshness.
+    const ageScore = (() => {
+      const a = s.last_email_age_seconds;
+      if (a == null) return 0;
+      if (a < 60) return 1;
+      if (a < 300) return 0.7;
+      if (a < 1800) return 0.4;
+      if (a < 7200) return 0.2;
+      return 0.05;
+    })();
+    const activeScore = Math.min(1, (s.active_sessions || 0) / 3);
+    const intensity = Math.min(1, 0.45 * (s.recent_pulse || 0) + 0.35 * activeScore + 0.20 * ageScore);
+
+    // Yellow shifts: pale-cool when quiet, warm-electric when busy.
+    // Hue blends from buttery (#f2e437) toward hot (#ffb000) through linear interp.
+    const lerp = (a, b, t) => Math.round(a + (b - a) * t);
+    const cool = [242, 228, 55];   // #f2e437
+    const warm = [255, 176, 0];    // #ffb000  (warm gold, more orange)
+    const r = lerp(cool[0], warm[0], intensity);
+    const g = lerp(cool[1], warm[1], intensity);
+    const b = lerp(cool[2], warm[2], intensity);
+    const newY = `rgb(${r}, ${g}, ${b})`;
+
+    // Animate the CSS custom property for color so all yellow inherits it.
+    // GSAP can tween CSS vars on :root via the proxy pattern.
+    const root = document.documentElement;
+    const cur = root.style.getPropertyValue("--y") || "rgb(242, 228, 55)";
+    if (cur !== newY) {
+      gsap.to(root, {
+        "--y": newY,
+        duration: 2.0,
+        ease: E.inOut,
+      });
+    }
+
+    // Composition shift: at high intensity, shapes spread outward subtly,
+    // letters scale up a hair, drift speeds up. Done via a master "intensity"
+    // GSAP timeline scaling shape transforms.
+    const targetMayorScale = 1 + intensity * 0.04;       // up to +4%
+    const targetShapeSpread = 1 + intensity * 0.08;      // up to +8% radial spread
+    const targetDriftMultiplier = 1 + intensity * 0.5;   // shapes drift further
+
+    gsap.to(".mayor-wrap svg", {
+      scale: targetMayorScale,
+      duration: 2.4,
+      ease: E.inOut,
+      overwrite: "auto",
+    });
+    // Spread the shape canvas as a group — preserves per-shape signal scaling.
+    gsap.to(".shapes svg > *", {
+      scale: targetShapeSpread,
+      transformOrigin: "800px 500px",  // viewBox center
+      duration: 2.4,
+      ease: E.inOut,
+      overwrite: false,
+    });
+
     lastStats = s;
   }
 
