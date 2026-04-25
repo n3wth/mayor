@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>mayor.wtf</title>
-<meta name="description" content="The Office of The Mayor — a live autonomous-agent inbox.">
+<meta name="description" content="The Office of The Mayor.">
 <meta name="theme-color" content="#000000">
 
 <link rel="icon" type="image/svg+xml" href="/favicon.svg">
@@ -29,15 +29,8 @@
 <style>
   :root {
     --y: #f2e437;
-    --y-dim: #6b6418;
     --k: #0a0a0a;
-    /* Sparkle accent palette — borrowed from the terminal status line.
-       Used sparingly: spark dots on new email, citizen promotions, shockwaves. */
-    --spark-1: #ffb000;  /* gold */
-    --spark-2: #4ade80;  /* green */
-    --spark-3: #22d3ee;  /* cyan */
-    --spark-4: #c084fc;  /* magenta-violet */
-    --spark-5: #f87171;  /* red-coral */
+    --w: #ffffff;
     --display: "Display", "Arial Narrow Bold", "Arial Narrow", sans-serif;
     --mono: "Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
     --sans: "Sans", ui-sans-serif, system-ui, -apple-system, sans-serif;
@@ -52,128 +45,60 @@
 
   .stage { position: fixed; inset: 0; overflow: hidden; }
 
-  /* GLSL ambient field — slow morphing yellow-on-black noise driven by stats. */
-  .field {
-    position: absolute;
-    inset: 0;
-    z-index: 0;
-    pointer-events: none;
-    opacity: 0.55;
-    mix-blend-mode: screen;
-  }
-  .field canvas { display: block; width: 100%; height: 100%; }
+  /* The whole viewport is a yellow plane. MAYOR + objects punch black holes.
+     One cutout per session today, one per citizen. Organic placement. */
+  .field { position: absolute; inset: 0; z-index: 1; pointer-events: none; }
+  .field svg { display: block; width: 100%; height: 100%; }
 
-  /* Shape canvas — each shape is a labeled signal */
-  .shapes { position: absolute; inset: 0; pointer-events: none; z-index: 2; }
-  .shapes svg { display: block; width: 100%; height: 100%; overflow: visible; }
-  .shape { will-change: transform, opacity; }
-  .shape-tip {
-    font-family: var(--mono);
-    font-size: 10px;
-    letter-spacing: 2px;
-    text-transform: uppercase;
-    fill: var(--y-dim);
-    opacity: 0;
-    pointer-events: none;
-    transition: opacity .4s ease;
-  }
-  .shape:hover .shape-tip { opacity: 1; }
-
-  /* Sparks layer — for transient colored bursts on real events */
-  .sparks {
-    position: absolute;
-    inset: 0;
-    pointer-events: none;
-    z-index: 3;
-    overflow: hidden;
-  }
+  .sparks { position: absolute; inset: 0; pointer-events: none; z-index: 5; overflow: hidden; }
   .spark {
     position: absolute;
-    width: 8px; height: 8px;
+    width: 6px; height: 6px;
     border-radius: 50%;
     will-change: transform, opacity;
     pointer-events: none;
+    mix-blend-mode: screen;
   }
 
-  /* MAYOR */
-  .mayor-wrap {
-    position: absolute;
-    inset: 0;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    pointer-events: none;
-    z-index: 4;
-  }
-  .mayor-wrap svg {
-    width: 92%;
-    height: auto;
-    max-height: 70vh;
-    overflow: visible;
-  }
-  .mayor-wrap svg text {
-    font-family: var(--display);
-    font-weight: 900;
-    fill: var(--y);
-  }
-
-  /* HUD */
-  .hud {
-    position: absolute;
-    inset: 0;
-    pointer-events: none;
-    z-index: 10;
-  }
-  .hud .panel {
-    position: absolute;
-    font-family: var(--mono);
-    font-size: clamp(10px, 1.1vw, 12px);
-    letter-spacing: 2px;
-    text-transform: uppercase;
-    color: var(--y);
-    opacity: 0.85;
-    line-height: 1.7;
-  }
-  .hud .panel .row { display: flex; justify-content: space-between; gap: 16px; min-width: 180px; }
-  .hud .panel .row .v { color: var(--y); font-variant-numeric: tabular-nums; }
-  .hud .panel .row .k { color: var(--y-dim); }
-
-  .hud .tl { top: clamp(20px, 4vw, 36px); left: clamp(20px, 4vw, 36px); }
-  .hud .tr { top: clamp(20px, 4vw, 36px); right: clamp(20px, 4vw, 36px); text-align: right; }
-  .hud .bl { bottom: clamp(20px, 4vw, 36px); left: clamp(20px, 4vw, 36px); }
-  .hud .br { bottom: clamp(20px, 4vw, 36px); right: clamp(20px, 4vw, 36px); text-align: right; pointer-events: auto; }
-
-  .hud a { color: var(--y); text-decoration: none; pointer-events: auto; opacity: 0.85; transition: opacity .25s ease; }
-  .hud a:hover { opacity: 1; text-decoration: underline; text-underline-offset: 4px; }
-
-  .hb { display: inline-block; width: 8px; height: 8px; background: var(--y); border-radius: 50%; margin-right: 8px; vertical-align: middle; }
-  .hb.offline { background: #c14b3a; }
-
-  /* The "send mail" CTA. Real hover affordance. */
+  /* The CTA — lowercase bold white at the bottom (original). */
   .cta {
     position: absolute;
     left: 50%;
-    bottom: clamp(60px, 9vh, 110px);
+    bottom: clamp(40px, 6vh, 64px);
     transform: translateX(-50%);
     pointer-events: auto;
-    font-family: var(--mono);
-    font-size: clamp(11px, 1.2vw, 13px);
-    letter-spacing: 3px;
-    text-transform: uppercase;
-    color: var(--y);
+    font-family: var(--sans);
+    font-weight: 700;
+    font-size: clamp(13px, 1.3vw, 16px);
+    letter-spacing: 0;
+    text-transform: lowercase;
+    color: var(--w);
     text-decoration: none;
-    border: 1.5px solid var(--y);
-    padding: clamp(10px, 1.4vw, 14px) clamp(20px, 2.4vw, 28px);
-    transition: background .2s ease, color .2s ease;
     z-index: 11;
+    transition: opacity .25s ease;
+    opacity: 0.92;
   }
-  .cta:hover { background: var(--y); color: var(--k); }
-  .cta .arrow { display: inline-block; margin-left: 10px; transition: transform .2s ease; }
-  .cta:hover .arrow { transform: translateX(4px); }
+  .cta:hover { opacity: 1; text-decoration: underline; text-underline-offset: 4px; }
+
+  /* HUD: implicit. n3wth.com only. */
+  .hud {
+    position: absolute;
+    top: clamp(20px, 4vw, 32px);
+    right: clamp(20px, 4vw, 32px);
+    font-family: var(--sans);
+    font-weight: 700;
+    font-size: clamp(11px, 1vw, 13px);
+    text-transform: lowercase;
+    color: var(--w);
+    pointer-events: auto;
+    z-index: 10;
+    opacity: 0.7;
+  }
+  .hud a { color: inherit; text-decoration: none; }
+  .hud a:hover { text-decoration: underline; text-underline-offset: 4px; opacity: 1; }
 
   @media (prefers-reduced-motion: reduce) {
     * { animation: none !important; transition: none !important; }
-    .field { display: none; }
   }
 </style>
 </head>
@@ -181,157 +106,38 @@
 
 <div class="stage">
 
-  <!-- GLSL ambient field — slow noise warp synced to live signals -->
   <div class="field" aria-hidden="true">
-    <canvas data-field></canvas>
-  </div>
-
-  <!-- Shape signals.
-       data-signal: which live metric drives this shape's pulse.
-       data-role: the geometric meaning (orbit, rail, beacon, well).
-       data-tip: tiny label shown on hover. -->
-  <div class="shapes" aria-hidden="true">
     <svg viewBox="0 0 1600 1000" preserveAspectRatio="xMidYMid slice">
-      <!-- Citizen orbit ring: outer arc that grows and animates with citizens count.
-           This stops being random — it's a literal ring of people. -->
-      <g class="shape" data-signal="citizen-ring" data-shape-id="ring">
-        <circle cx="800" cy="500" r="380" fill="none" stroke="var(--y)" stroke-width="1" stroke-dasharray="2 14" opacity="0.35"/>
-      </g>
+      <defs>
+        <mask id="cutout" maskUnits="userSpaceOnUse" x="0" y="0" width="1600" height="1000">
+          <rect x="0" y="0" width="1600" height="1000" fill="white"/>
 
-      <!-- Citizen orbital nodes — these REPLACE the scattered circles.
-           Each one is a real position on the ring. As citizens grow, dim slots become bright nodes. -->
-      <g class="shape" data-signal="citizen" data-shape-id="c0" data-orbit="0">
-        <circle cx="0" cy="0" r="22" fill="var(--y)"/>
-        <text class="shape-tip" x="0" y="42" text-anchor="middle">citizen 1</text>
-      </g>
-      <g class="shape" data-signal="citizen" data-shape-id="c1" data-orbit="1">
-        <circle cx="0" cy="0" r="22" fill="var(--y)"/>
-        <text class="shape-tip" x="0" y="42" text-anchor="middle">citizen 2</text>
-      </g>
-      <g class="shape" data-signal="citizen" data-shape-id="c2" data-orbit="2">
-        <circle cx="0" cy="0" r="22" fill="var(--y)"/>
-        <text class="shape-tip" x="0" y="42" text-anchor="middle">citizen 3</text>
-      </g>
-      <g class="shape" data-signal="citizen-slot" data-shape-id="c3" data-orbit="3">
-        <circle cx="0" cy="0" r="10" fill="var(--y)" opacity="0.18"/>
-      </g>
-      <g class="shape" data-signal="citizen-slot" data-shape-id="c4" data-orbit="4">
-        <circle cx="0" cy="0" r="10" fill="var(--y)" opacity="0.18"/>
-      </g>
-      <g class="shape" data-signal="citizen-slot" data-shape-id="c5" data-orbit="5">
-        <circle cx="0" cy="0" r="10" fill="var(--y)" opacity="0.18"/>
-      </g>
-      <g class="shape" data-signal="citizen-slot" data-shape-id="c6" data-orbit="6">
-        <circle cx="0" cy="0" r="10" fill="var(--y)" opacity="0.18"/>
-      </g>
-      <g class="shape" data-signal="citizen-slot" data-shape-id="c7" data-orbit="7">
-        <circle cx="0" cy="0" r="10" fill="var(--y)" opacity="0.18"/>
-      </g>
+          <!-- MAYOR — the only typographic statement. Knockout. -->
+          <text id="mayor-text"
+                font-family="Display, Arial Narrow Bold, sans-serif"
+                font-weight="900"
+                font-size="420"
+                text-anchor="middle"
+                x="800" y="600"
+                letter-spacing="-14"
+                fill="black">MAYOR</text>
 
-      <!-- Sessions today rail — a literal bar chart on the left, ticks for each session today. -->
-      <g class="shape" data-signal="session-today-axis" data-shape-id="st-axis">
-        <line x1="100" y1="780" x2="100" y2="220" stroke="var(--y)" stroke-width="1" opacity="0.35"/>
-        <text class="shape-tip" font-family="var(--mono)" font-size="10" letter-spacing="2" fill="var(--y-dim)" x="100" y="810" text-anchor="middle">SESSIONS TODAY</text>
-      </g>
-      <g class="shape" data-signal="session-today-fill" data-shape-id="st-fill">
-        <line x1="100" y1="780" x2="100" y2="780" stroke="var(--y)" stroke-width="3"/>
-      </g>
+          <!-- Object pool: motion.js populates these dynamically based on stats.
+               Each cutout = one session or citizen. -->
+          <g id="objects"></g>
+        </mask>
+      </defs>
 
-      <!-- Sessions this hour rail — mirror on the right. -->
-      <g class="shape" data-signal="session-hour-axis" data-shape-id="sh-axis">
-        <line x1="1500" y1="780" x2="1500" y2="220" stroke="var(--y)" stroke-width="1" opacity="0.35"/>
-        <text class="shape-tip" font-family="var(--mono)" font-size="10" letter-spacing="2" fill="var(--y-dim)" x="1500" y="810" text-anchor="middle">SESSIONS / HR</text>
-      </g>
-      <g class="shape" data-signal="session-hour-fill" data-shape-id="sh-fill">
-        <line x1="1500" y1="780" x2="1500" y2="780" stroke="var(--y)" stroke-width="3"/>
-      </g>
-
-      <!-- Active beacon: the triangle is now the literal "thinking" indicator at the top.
-           When sessions are active it rotates and pulses; otherwise it sits still. -->
-      <g class="shape" data-signal="active" data-shape-id="t">
-        <polygon points="800,80 836,144 764,144" fill="var(--y)"/>
-        <text class="shape-tip" x="800" y="170" text-anchor="middle">thinking</text>
-      </g>
-
-      <!-- Pulse arcs: 4 concentric arcs that bloom from the center on activity.
-           These replace the random pulse dots. They're synced to recent_pulse. -->
-      <g class="shape" data-signal="pulse-arc" data-shape-id="pa1">
-        <circle cx="800" cy="500" r="200" fill="none" stroke="var(--y)" stroke-width="1.5" stroke-dasharray="4 12" opacity="0.4"/>
-      </g>
-      <g class="shape" data-signal="pulse-arc" data-shape-id="pa2">
-        <circle cx="800" cy="500" r="280" fill="none" stroke="var(--y)" stroke-width="1" stroke-dasharray="2 18" opacity="0.3"/>
-      </g>
-      <g class="shape" data-signal="pulse-arc" data-shape-id="pa3">
-        <circle cx="800" cy="500" r="460" fill="none" stroke="var(--y)" stroke-width="0.6" stroke-dasharray="1 28" opacity="0.18"/>
-      </g>
-
-      <!-- Last-email well: square that brightens with freshness, positioned at bottom center -->
-      <g class="shape" data-signal="last-email" data-shape-id="le">
-        <rect x="780" y="900" width="40" height="40" fill="var(--y)"/>
-        <text class="shape-tip" x="800" y="970" text-anchor="middle">last received</text>
-      </g>
-
-      <!-- Corner markers: literal compass-style anchors, not decorative drift -->
-      <g class="shape" data-signal="corner" data-shape-id="cn1">
-        <line x1="60" y1="60" x2="120" y2="60" stroke="var(--y)" stroke-width="1.5" opacity="0.5"/>
-        <line x1="60" y1="60" x2="60" y2="120" stroke="var(--y)" stroke-width="1.5" opacity="0.5"/>
-      </g>
-      <g class="shape" data-signal="corner" data-shape-id="cn2">
-        <line x1="1540" y1="60" x2="1480" y2="60" stroke="var(--y)" stroke-width="1.5" opacity="0.5"/>
-        <line x1="1540" y1="60" x2="1540" y2="120" stroke="var(--y)" stroke-width="1.5" opacity="0.5"/>
-      </g>
-      <g class="shape" data-signal="corner" data-shape-id="cn3">
-        <line x1="60" y1="940" x2="120" y2="940" stroke="var(--y)" stroke-width="1.5" opacity="0.5"/>
-        <line x1="60" y1="940" x2="60" y2="880" stroke="var(--y)" stroke-width="1.5" opacity="0.5"/>
-      </g>
-      <g class="shape" data-signal="corner" data-shape-id="cn4">
-        <line x1="1540" y1="940" x2="1480" y2="940" stroke="var(--y)" stroke-width="1.5" opacity="0.5"/>
-        <line x1="1540" y1="940" x2="1540" y2="880" stroke="var(--y)" stroke-width="1.5" opacity="0.5"/>
-      </g>
+      <rect x="0" y="0" width="1600" height="1000" fill="var(--y)" mask="url(#cutout)"/>
     </svg>
   </div>
 
-  <!-- Sparks layer — colored particle bursts on real events -->
   <div class="sparks" data-sparks aria-hidden="true"></div>
 
-  <!-- MAYOR -->
-  <h1 class="mayor-wrap" aria-label="Mayor">
-    <svg viewBox="-40 -40 1080 400"
-         role="img" aria-hidden="true"
-         preserveAspectRatio="xMidYMid meet">
-      <g font-size="340" text-anchor="middle">
-        <text class="l" x="165" y="270">M</text>
-        <text class="l" x="358" y="270">A</text>
-        <text class="l" x="525" y="270">Y</text>
-        <text class="l" x="695" y="270">O</text>
-        <text class="l" x="865" y="270">R</text>
-      </g>
-    </svg>
-  </h1>
+  <a class="cta" href="mailto:um@mayor.wtf">um@mayor.wtf</a>
 
-  <!-- CTA -->
-  <a class="cta" href="mailto:um@mayor.wtf?subject=Mayor%2C%20I%20have%20a%20question">
-    Email&nbsp;<span data-text="addr">um@mayor.wtf</span><span class="arrow">→</span>
-  </a>
-
-  <!-- HUD -->
   <div class="hud">
-    <div class="panel tl">
-      <div class="row"><span class="k">domain</span><span class="v">mayor.wtf</span></div>
-      <div class="row"><span class="k">status</span><span class="v"><span class="hb" data-hb></span><span data-status>online</span></span></div>
-    </div>
-    <div class="panel tr">
-      <div class="row"><span class="k">citizens</span><span class="v" data-stat="citizens">·</span></div>
-      <div class="row"><span class="k">sessions today</span><span class="v" data-stat="sessions_today">·</span></div>
-      <div class="row"><span class="k">last received</span><span class="v" data-stat="last_email_age">—</span></div>
-    </div>
-    <div class="panel bl">
-      <div class="row"><span class="k">held by</span><span class="v">Oliver Newth</span></div>
-      <div class="row"><span class="k">at</span><span class="v">Google · SF</span></div>
-    </div>
-    <div class="panel br">
-      <div class="row"><span class="v"><a href="https://n3wth.com">n3wth.com ↗</a></span></div>
-    </div>
+    <a href="https://n3wth.com">n3wth.com</a>
   </div>
 
 </div>
