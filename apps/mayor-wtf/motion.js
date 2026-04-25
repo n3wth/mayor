@@ -2581,6 +2581,340 @@ export function initMotion(gsap) {
     }
   });
 
+  // ── FIRST VISIT JOURNEY ──────────────────────────────────────────────
+  // 60-second guided opening for first-time visitors. Shows the room's
+  // capabilities one step at a time. Gated by localStorage. Skippable
+  // with Esc. Always advances on timeout even if the user does nothing.
+  const JOURNEY_KEY = "mayor:onboard:done";
+  const journey = {
+    timers: [],
+    rafs: [],
+    el: null,
+    arrow: null,
+    active: false,
+    aborted: false,
+    userClicked: false,
+    userPainted: false,
+    listeners: [],
+  };
+  function journeyShouldRun() {
+    if (reduced) return false;
+    try {
+      if (localStorage.getItem(JOURNEY_KEY)) return false;
+    } catch {
+      return false;
+    }
+    return true;
+  }
+  function journeyMarkDone() {
+    try { localStorage.setItem(JOURNEY_KEY, String(Date.now())); } catch {}
+  }
+  function journeyEnsureStyle() {
+    if (document.getElementById("journey-style")) return;
+    const s = document.createElement("style");
+    s.id = "journey-style";
+    s.textContent = `
+      .journey-tagline {
+        position: fixed;
+        top: clamp(28px, 5vh, 56px);
+        left: 50%;
+        transform: translateX(-50%) translateY(-6px);
+        z-index: 60;
+        pointer-events: none;
+        font-family: var(--mono, ui-monospace, monospace);
+        font-size: 12px;
+        letter-spacing: 0.18em;
+        text-transform: uppercase;
+        color: var(--y, #f0d72a);
+        background: rgba(5,5,5,0.78);
+        padding: 9px 16px;
+        border: 1px solid rgba(240,215,42,0.35);
+        border-radius: 999px;
+        white-space: nowrap;
+        opacity: 0;
+        transition: opacity .45s ease, transform .45s ease;
+        max-width: calc(100vw - 32px);
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .journey-tagline.show {
+        opacity: 1;
+        transform: translateX(-50%) translateY(0);
+      }
+      .journey-arrow {
+        position: fixed;
+        z-index: 60;
+        pointer-events: none;
+        color: var(--y, #f0d72a);
+        font-family: var(--mono, ui-monospace, monospace);
+        font-size: 22px;
+        line-height: 1;
+        opacity: 0;
+        transition: opacity .35s ease;
+        text-shadow: 0 0 12px rgba(240,215,42,0.6);
+      }
+      .journey-arrow.show { opacity: 1; }
+      .journey-arrow.bob { animation: journey-bob 1.2s ease-in-out infinite; }
+      @keyframes journey-bob {
+        0%, 100% { transform: translate(0, 0); }
+        50% { transform: translate(0, -6px); }
+      }
+      @media (max-width: 600px) {
+        .journey-tagline { font-size: 10.5px; letter-spacing: 0.14em; padding: 8px 12px; }
+      }
+    `;
+    document.head.appendChild(s);
+  }
+  function journeyEnsureElements() {
+    journeyEnsureStyle();
+    if (!journey.el) {
+      const t = document.createElement("div");
+      t.className = "journey-tagline";
+      t.setAttribute("role", "status");
+      t.setAttribute("aria-live", "polite");
+      document.body.appendChild(t);
+      journey.el = t;
+    }
+    if (!journey.arrow) {
+      const a = document.createElement("div");
+      a.className = "journey-arrow";
+      a.setAttribute("aria-hidden", "true");
+      a.textContent = "↘";
+      document.body.appendChild(a);
+      journey.arrow = a;
+    }
+  }
+  function journeySetTagline(text) {
+    if (!journey.el || journey.aborted) return;
+    // Quick fade-out / swap / fade-in for graceful transitions.
+    journey.el.classList.remove("show");
+    const id = setTimeout(() => {
+      if (!journey.el || journey.aborted) return;
+      journey.el.textContent = text;
+      journey.el.classList.add("show");
+    }, 220);
+    journey.timers.push(id);
+  }
+  function journeyHideTagline() {
+    if (!journey.el) return;
+    journey.el.classList.remove("show");
+  }
+  function journeyShowArrowToward(targetEl) {
+    if (!journey.arrow || !targetEl || journey.aborted) return;
+    const r = targetEl.getBoundingClientRect();
+    if (!r || (r.width === 0 && r.height === 0)) return;
+    // Place arrow just above-left of the target, pointing toward it.
+    const x = r.left - 28;
+    const y = r.top - 32;
+    journey.arrow.style.left = `${Math.max(8, x)}px`;
+    journey.arrow.style.top = `${Math.max(8, y)}px`;
+    journey.arrow.textContent = "↘";
+    journey.arrow.classList.add("show", "bob");
+  }
+  function journeyHideArrow() {
+    if (!journey.arrow) return;
+    journey.arrow.classList.remove("show", "bob");
+  }
+  function journeyAddTimer(id) {
+    journey.timers.push(id);
+    return id;
+  }
+  function journeyAbort(markDone) {
+    if (!journey.active && !journey.aborted) {
+      journey.aborted = true;
+      return;
+    }
+    journey.aborted = true;
+    journey.active = false;
+    for (const id of journey.timers) clearTimeout(id);
+    journey.timers.length = 0;
+    for (const id of journey.rafs) cancelAnimationFrame(id);
+    journey.rafs.length = 0;
+    for (const off of journey.listeners) {
+      try { off(); } catch {}
+    }
+    journey.listeners.length = 0;
+    journeyHideArrow();
+    if (journey.el) journey.el.classList.remove("show");
+    if (markDone) journeyMarkDone();
+  }
+  // Sleep helper that resolves on either timeout OR a gesture predicate
+  // becoming true (polled). Always resolves so the chain keeps moving.
+  function journeyWait(ms, gesturePredicate) {
+    return new Promise((resolve) => {
+      if (journey.aborted) { resolve("abort"); return; }
+      const start = Date.now();
+      let done = false;
+      const finish = (reason) => {
+        if (done) return;
+        done = true;
+        resolve(reason);
+      };
+      const timeoutId = setTimeout(() => finish("timeout"), ms);
+      journey.timers.push(timeoutId);
+      if (gesturePredicate) {
+        const tick = () => {
+          if (done) return;
+          if (journey.aborted) { finish("abort"); return; }
+          try {
+            if (gesturePredicate()) { finish("gesture"); return; }
+          } catch {}
+          if (Date.now() - start >= ms) { finish("timeout"); return; }
+          const id = setTimeout(tick, 120);
+          journey.timers.push(id);
+        };
+        tick();
+      }
+    });
+  }
+  // Synthesize a shift+drag across the hero — purely visual demo of the
+  // melody-painting gesture. We don't actually drive the engine; we paint
+  // a soft yellow stripe + plant a few ripples to suggest a gesture.
+  function journeyDemoMelodyDrag() {
+    if (journey.aborted || reduced) return;
+    const w = window.innerWidth;
+    const h = window.innerHeight;
+    // Trace from left-third to right-third, slightly above center.
+    const y = h * 0.55;
+    const x0 = w * 0.30;
+    const x1 = w * 0.70;
+    const steps = 7;
+    for (let i = 0; i < steps; i++) {
+      const t = i / (steps - 1);
+      const x = x0 + (x1 - x0) * t;
+      // gentle arc
+      const yi = y - Math.sin(t * Math.PI) * 28;
+      const id = setTimeout(() => {
+        if (journey.aborted) return;
+        if (ripplesHandle) {
+          try { ripplesHandle.add(x, yi, false); } catch {}
+        }
+        if (fieldHandle) {
+          try { fieldHandle.triggerPulse(x / w, 1 - yi / h); } catch {}
+        }
+        if (soundOn && pluckSynth) {
+          try { pluck(noteForX(x / w), 0, 0.35); } catch {}
+        }
+      }, i * 90);
+      journey.timers.push(id);
+    }
+  }
+  async function runJourney() {
+    if (!journeyShouldRun()) return;
+    journey.active = true;
+    journeyEnsureElements();
+
+    // Watch user gestures so steps can advance early.
+    const onClickWatch = () => { journey.userClicked = true; };
+    document.addEventListener("click", onClickWatch, { capture: true });
+    journey.listeners.push(() => document.removeEventListener("click", onClickWatch, { capture: true }));
+
+    // Shift-drag detector — paints flag on shift-held pointermove.
+    let shiftDown = false;
+    let shiftMoves = 0;
+    const onShiftKey = (e) => {
+      if (e.key === "Shift") shiftDown = e.type === "keydown";
+    };
+    const onShiftMove = (e) => {
+      if (shiftDown && (e.pressure > 0 || e.buttons > 0)) {
+        shiftMoves++;
+        if (shiftMoves > 3) journey.userPainted = true;
+      }
+    };
+    window.addEventListener("keydown", onShiftKey);
+    window.addEventListener("keyup", onShiftKey);
+    window.addEventListener("pointermove", onShiftMove, { passive: true });
+    journey.listeners.push(() => window.removeEventListener("keydown", onShiftKey));
+    journey.listeners.push(() => window.removeEventListener("keyup", onShiftKey));
+    journey.listeners.push(() => window.removeEventListener("pointermove", onShiftMove));
+
+    // Step 1 (0s) — Hero glides in. Tagline appears.
+    journeySetTagline("MAYOR welcomes you. Watch.");
+    if (await journeyWait(3000) === "abort") return;
+
+    // Step 2 (3s) — Sound chip hint. Don't actually press it; show arrow.
+    if (journey.aborted) return;
+    journeySetTagline("First, the room sings on its own.");
+    if (soundBtn && !soundOn) {
+      journeyShowArrowToward(soundBtn);
+    }
+    // Advance early if user toggles sound on.
+    await journeyWait(5000, () => soundOn);
+    journeyHideArrow();
+    if (journey.aborted) return;
+
+    // Step 3 (8s) — Click anywhere prompt.
+    journeySetTagline("Click anywhere — leave a note in the room.");
+    journey.userClicked = false; // reset; only gestures during this step count
+    await journeyWait(4000, () => journey.userClicked);
+    if (journey.aborted) return;
+
+    // Step 4 (12s) — Shift+drag suggestion. If no try in 4s, demo it.
+    journeySetTagline("Hold shift and drag to paint a melody.");
+    journey.userPainted = false;
+    const r4 = await journeyWait(4000, () => journey.userPainted);
+    if (journey.aborted) return;
+    if (r4 === "timeout" && !journey.userPainted) {
+      journeyDemoMelodyDrag();
+      // Brief pause so the demo lands before next prompt overrides it.
+      if (await journeyWait(3500) === "abort") return;
+    } else {
+      // User tried — give them a moment to enjoy it before moving on.
+      if (await journeyWait(3500) === "abort") return;
+    }
+
+    // Step 5 (~20s) — Drum keys.
+    journeySetTagline("Type 1, 2, 3, 4, 5 to play drums.");
+    if (await journeyWait(8000) === "abort") return;
+
+    // Step 6 (~28s) — Pattern galaxy.
+    journeySetTagline("Press G to summon the pattern galaxy.");
+    if (await journeyWait(7000) === "abort") return;
+
+    // Step 7 (~35s) — MAYOR sequencer cells.
+    journeySetTagline("The MAYOR letters are an instrument. Click cells beneath them.");
+    if (await journeyWait(10000) === "abort") return;
+
+    // Step 8 (~45s) — Other visitors.
+    journeySetTagline("You're never alone here. Other visitors share the room.");
+    if (await journeyWait(10000) === "abort") return;
+
+    // Step 9 (~55s) — Welcome, fade, mark done.
+    journeySetTagline("Welcome to mayor.wtf.");
+    if (await journeyWait(4500) === "abort") return;
+    journeyHideTagline();
+    // Give the fade a beat to complete before we tear elements down.
+    const fadeId = setTimeout(() => {
+      if (journey.el) { try { journey.el.remove(); } catch {} journey.el = null; }
+      if (journey.arrow) { try { journey.arrow.remove(); } catch {} journey.arrow = null; }
+    }, 600);
+    journey.timers.push(fadeId);
+    journey.active = false;
+    journeyMarkDone();
+    // Clean up watchers — the journey is over either way.
+    for (const off of journey.listeners) {
+      try { off(); } catch {}
+    }
+    journey.listeners.length = 0;
+  }
+  // Esc skips the whole journey — separate listener so it never fights
+  // with the existing Esc handlers (galaxy, ghost cancel). Marks done so
+  // it doesn't replay on next visit.
+  const onJourneyEsc = (e) => {
+    if (e.key !== "Escape") return;
+    if (!journey.active && !journey.aborted) return;
+    if (journey.aborted) return;
+    journeyAbort(true);
+    if (journey.el) { try { journey.el.remove(); } catch {} journey.el = null; }
+    if (journey.arrow) { try { journey.arrow.remove(); } catch {} journey.arrow = null; }
+  };
+  window.addEventListener("keydown", onJourneyEsc);
+  // Kick it off after a short beat so the hero entrance has begun.
+  if (journeyShouldRun()) {
+    const startId = setTimeout(() => { runJourney().catch(() => {}); }, 400);
+    journey.timers.push(startId);
+  }
+
   // ── CLEANUP ──
   const onPageHide = () => {
     clearInterval(pollInterval);
@@ -2599,6 +2933,8 @@ export function initMotion(gsap) {
     if (ripplesHandle) ripplesHandle.destroy();
     if (es) { try { es.close(); } catch {} }
     if (chordWheelEl) { try { chordWheelEl.remove(); } catch {} chordWheelEl = null; }
+    journeyAbort(false);
+    window.removeEventListener("keydown", onJourneyEsc);
     gsap.killTweensOf("*");
   };
   window.addEventListener("pagehide", onPageHide);
@@ -2620,6 +2956,8 @@ export function initMotion(gsap) {
       if (ripplesHandle) ripplesHandle.destroy();
       if (es) { try { es.close(); } catch {} }
       if (chordWheelEl) { try { chordWheelEl.remove(); } catch {} chordWheelEl = null; }
+      journeyAbort(false);
+      window.removeEventListener("keydown", onJourneyEsc);
       window.removeEventListener("pagehide", onPageHide);
       gsap.killTweensOf("*");
     },
