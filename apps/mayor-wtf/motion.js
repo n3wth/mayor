@@ -1150,6 +1150,74 @@ export function initMotion(gsap) {
     }
   });
 
+  // ── VISUAL KEYS: typing as a live performance instrument ─────────────
+  // 1-5 → M/A/Y/O/R drum/voice hit at full velocity.
+  // z x c v b → one-shot lead notes pulled from the current chord scale.
+  // Each keypress flashes its letter and broadcasts a "kick" so peers
+  // hear and see it too. Separate listener so it never interferes with
+  // the konami buffer above.
+  const KEY_TO_LETTER = { "1": "M", "2": "A", "3": "Y", "4": "O", "5": "R" };
+  const LEAD_KEYS = { "z": 0, "x": 1, "c": 2, "v": 3, "b": 4 };
+  function pulseLetterGlyph(L) {
+    const letter = letters.find((l) => l.dataset.letter === L);
+    if (!letter) return;
+    gsap.fromTo(letter,
+      { scale: 1 },
+      { scale: 1.18, duration: 0.08, ease: "power2.out", overwrite: "auto" }
+    );
+    gsap.to(letter, { scale: 1, duration: 0.55, ease: "elastic.out(1, 0.55)", delay: 0.08, overwrite: "auto" });
+  }
+  function currentChord() {
+    if (!Tone) return CHORDS[0];
+    const idx = Math.floor((Tone.Transport.seconds || 0) / (60 / Tone.Transport.bpm.value * 4 * 8)) % CHORDS.length;
+    return CHORDS[idx] || CHORDS[0];
+  }
+  function leadNoteForKey(key) {
+    const ch = currentChord();
+    const i = LEAD_KEYS[key];
+    // z..b → degrees 0..4 of chord scale, alternating octaves 4/5 for variety.
+    const degree = i % ch.scale.length;
+    const oct = 4 + (i % 2);
+    return ch.scale[degree] + oct;
+  }
+  function broadcastKick(payload) {
+    fetch(`${SYNC_BASE}/event`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ type: "kick", from: SELF_ID, ...payload }),
+      keepalive: true,
+    }).catch(() => {});
+  }
+  window.addEventListener("keydown", (e) => {
+    if (e.shiftKey || e.altKey || e.metaKey || e.ctrlKey) return;
+    if (e.repeat) return;
+    const t = e.target;
+    if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
+    const key = e.key;
+    const drumLetter = KEY_TO_LETTER[key];
+    if (drumLetter) {
+      pulseLetterGlyph(drumLetter);
+      lastInteractionAt = Date.now();
+      if (soundOn && Tone) {
+        ensureVoices();
+        playStep(drumLetter, Tone.now(), 0.85);
+      }
+      broadcastKick({ letter: drumLetter });
+      return;
+    }
+    if (LEAD_KEYS.hasOwnProperty(key)) {
+      const note = leadNoteForKey(key);
+      pulseLetterGlyph("R");
+      lastInteractionAt = Date.now();
+      if (soundOn && Tone) {
+        ensureVoices();
+        try { voices.lead.triggerAttackRelease(note, "8n", Tone.now(), 0.7); } catch {}
+      }
+      broadcastKick({ letter: "R", note });
+      return;
+    }
+  });
+
   // ── PSYCHEDELIC ESCALATION + WEIRD EVENTS ────────────────────────────
   // Psy rises slowly over time the user is on the page (capped at 0.55 by
   // default). Clicking and chord activity nudges it up, idleness brings it
@@ -1722,6 +1790,22 @@ export function initMotion(gsap) {
           // Step toggle from a peer
           if (ev.type === "step") {
             applyStepFromPeer(ev.letter, ev.idx | 0, !!ev.on);
+            return;
+          }
+          if (ev.type === "kick") {
+            // Peer is performing live — pulse the same letter and play
+            // the same voice at slightly lower velocity so locals stay
+            // audibly forward.
+            const L = (typeof ev.letter === "string" ? ev.letter.toUpperCase() : "").slice(0, 1);
+            if (L) pulseLetterGlyph(L);
+            if (soundOn && Tone) {
+              ensureVoices();
+              if (typeof ev.note === "string" && ev.note && voices && voices.lead) {
+                try { voices.lead.triggerAttackRelease(ev.note, "8n", Tone.now(), 0.5); } catch {}
+              } else if (L) {
+                playStep(L, Tone.now(), 0.6);
+              }
+            }
             return;
           }
           if (ev.type === "click" || ev.type === "tab") {
