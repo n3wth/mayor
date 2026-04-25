@@ -2933,6 +2933,81 @@ export function initMotion(gsap) {
     }
   });
 
+  // ── COLLAPSE ('k') ────────────────────────────────────────────────────
+  // Press 'k' → every visual element scales to 0 over 1.5s (a black hole at
+  // the centre of the page), 1s of total black silence, then everything
+  // explodes back from centre over 2s with a field pulse + 5-note ascending
+  // arpeggio. Grid state persists; this is a visual reset, not a logical
+  // one. Locked while in progress so it can't re-trigger.
+  const COLLAPSE_TARGETS =
+    ".hero, .seq, .corner, .cta, .sound, .field, .stars, .stream, .ripples, .trail, .aurora";
+  let collapseInProgress = false;
+  function runCollapse() {
+    if (collapseInProgress || reduced) return;
+    collapseInProgress = true;
+    // Snapshot current master volume so we can restore exactly on rebirth.
+    const hadAudio = !!(window.Tone && window.Tone.Destination && window.Tone.Destination.volume);
+    const restoreVol = hadAudio ? window.Tone.Destination.volume.value : 0;
+    // Collapse: every visible surface contracts to a single point at centre.
+    gsap.to(COLLAPSE_TARGETS, {
+      scale: 0,
+      transformOrigin: "center center",
+      duration: 1.5,
+      ease: "power3.in",
+    });
+    // Dim the room to silence in lockstep with the visual collapse.
+    if (hadAudio) {
+      gsap.to(window.Tone.Destination.volume, {
+        value: -60,
+        duration: 1.5,
+      });
+    }
+    // 1.5s collapse + 1s of total silence = 2.5s before rebirth begins.
+    setTimeout(() => {
+      // Rebirth: explode back from centre over 2s. expo.out so the eye
+      // catches a sharp burst then settles. Stagger 0.04 keeps it lively
+      // without smearing the timing.
+      gsap.to(COLLAPSE_TARGETS, {
+        scale: 1,
+        transformOrigin: "center center",
+        duration: 2,
+        ease: "expo.out",
+        stagger: 0.04,
+        onComplete: () => {
+          collapseInProgress = false;
+        },
+      });
+      // Restore audio in lockstep with rebirth.
+      if (hadAudio) {
+        gsap.to(window.Tone.Destination.volume, {
+          value: restoreVol,
+          duration: 2,
+        });
+      }
+      // Field pulse fires from centre — synchronised with the rebirth.
+      if (fieldHandle) fieldHandle.triggerPulse(0.5, 0.5);
+      // 5-note ascending arpeggio. Pentatonic so it can't sound wrong.
+      // PENT[5..9] = A3, C4, D4, E4, G4 — middle of the scale, bright but
+      // not shrill. Spaced 0.12s so the figure lands inside the rebirth.
+      if (soundOn && Tone && pluckSynth) {
+        const arp = ["A3", "C4", "D4", "E4", "G4"];
+        const base = Tone.now();
+        for (let i = 0; i < arp.length; i++) {
+          try { pluck(arp[i], base + i * 0.12, 0.7); } catch {}
+        }
+      }
+    }, 2500);
+  }
+  window.addEventListener("keydown", (e) => {
+    if (e.key !== "k" && e.key !== "K") return;
+    if (e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return;
+    if (e.repeat) return;
+    const t = e.target;
+    if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
+    if (collapseInProgress) return; // locked while in progress
+    runCollapse();
+  });
+
   // ── CLEANUP ──
   const onPageHide = () => {
     clearInterval(pollInterval);
