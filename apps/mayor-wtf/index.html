@@ -31,6 +31,13 @@
     --y: #f2e437;
     --y-dim: #6b6418;
     --k: #0a0a0a;
+    /* Sparkle accent palette — borrowed from the terminal status line.
+       Used sparingly: spark dots on new email, citizen promotions, shockwaves. */
+    --spark-1: #ffb000;  /* gold */
+    --spark-2: #4ade80;  /* green */
+    --spark-3: #22d3ee;  /* cyan */
+    --spark-4: #c084fc;  /* magenta-violet */
+    --spark-5: #f87171;  /* red-coral */
     --display: "Display", "Arial Narrow Bold", "Arial Narrow", sans-serif;
     --mono: "Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
     --sans: "Sans", ui-sans-serif, system-ui, -apple-system, sans-serif;
@@ -45,8 +52,19 @@
 
   .stage { position: fixed; inset: 0; overflow: hidden; }
 
+  /* GLSL ambient field — slow morphing yellow-on-black noise driven by stats. */
+  .field {
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+    pointer-events: none;
+    opacity: 0.55;
+    mix-blend-mode: screen;
+  }
+  .field canvas { display: block; width: 100%; height: 100%; }
+
   /* Shape canvas — each shape is a labeled signal */
-  .shapes { position: absolute; inset: 0; pointer-events: none; }
+  .shapes { position: absolute; inset: 0; pointer-events: none; z-index: 2; }
   .shapes svg { display: block; width: 100%; height: 100%; overflow: visible; }
   .shape { will-change: transform, opacity; }
   .shape-tip {
@@ -61,6 +79,22 @@
   }
   .shape:hover .shape-tip { opacity: 1; }
 
+  /* Sparks layer — for transient colored bursts on real events */
+  .sparks {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    z-index: 3;
+    overflow: hidden;
+  }
+  .spark {
+    position: absolute;
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    will-change: transform, opacity;
+    pointer-events: none;
+  }
+
   /* MAYOR */
   .mayor-wrap {
     position: absolute;
@@ -69,6 +103,7 @@
     align-items: center;
     justify-content: center;
     pointer-events: none;
+    z-index: 4;
   }
   .mayor-wrap svg {
     width: 92%;
@@ -138,6 +173,7 @@
 
   @media (prefers-reduced-motion: reduce) {
     * { animation: none !important; transition: none !important; }
+    .field { display: none; }
   }
 </style>
 </head>
@@ -145,82 +181,118 @@
 
 <div class="stage">
 
+  <!-- GLSL ambient field — slow noise warp synced to live signals -->
+  <div class="field" aria-hidden="true">
+    <canvas data-field></canvas>
+  </div>
+
   <!-- Shape signals.
        data-signal: which live metric drives this shape's pulse.
+       data-role: the geometric meaning (orbit, rail, beacon, well).
        data-tip: tiny label shown on hover. -->
   <div class="shapes" aria-hidden="true">
     <svg viewBox="0 0 1600 1000" preserveAspectRatio="xMidYMid slice">
-      <!-- Top band: citizens & infrastructure -->
-      <g class="shape" data-signal="citizen" data-shape-id="c0">
-        <circle cx="220" cy="180" r="60" fill="var(--y)"/>
-        <text class="shape-tip" x="220" y="270" text-anchor="middle">citizen 1</text>
-      </g>
-      <g class="shape" data-signal="citizen" data-shape-id="c1">
-        <circle cx="1380" cy="220" r="50" fill="var(--y)"/>
-        <text class="shape-tip" x="1380" y="295" text-anchor="middle">citizen 2</text>
-      </g>
-      <g class="shape" data-signal="citizen" data-shape-id="c2">
-        <circle cx="800" cy="160" r="40" fill="var(--y)"/>
-        <text class="shape-tip" x="800" y="225" text-anchor="middle">citizen 3</text>
-      </g>
-      <g class="shape" data-signal="citizen-slot" data-shape-id="c3">
-        <circle cx="500" cy="120" r="14" fill="var(--y)" opacity="0.25"/>
-      </g>
-      <g class="shape" data-signal="citizen-slot" data-shape-id="c4">
-        <circle cx="1100" cy="120" r="14" fill="var(--y)" opacity="0.25"/>
+      <!-- Citizen orbit ring: outer arc that grows and animates with citizens count.
+           This stops being random — it's a literal ring of people. -->
+      <g class="shape" data-signal="citizen-ring" data-shape-id="ring">
+        <circle cx="800" cy="500" r="380" fill="none" stroke="var(--y)" stroke-width="1" stroke-dasharray="2 14" opacity="0.35"/>
       </g>
 
-      <!-- Side rails: sessions today (length scales with count) -->
-      <g class="shape" data-signal="session-today" data-shape-id="st">
-        <rect x="80" y="780" width="180" height="14" fill="var(--y)"/>
-        <text class="shape-tip" x="170" y="810" text-anchor="middle">sessions today</text>
+      <!-- Citizen orbital nodes — these REPLACE the scattered circles.
+           Each one is a real position on the ring. As citizens grow, dim slots become bright nodes. -->
+      <g class="shape" data-signal="citizen" data-shape-id="c0" data-orbit="0">
+        <circle cx="0" cy="0" r="22" fill="var(--y)"/>
+        <text class="shape-tip" x="0" y="42" text-anchor="middle">citizen 1</text>
       </g>
-      <g class="shape" data-signal="session-hour" data-shape-id="sh">
-        <rect x="1340" y="820" width="180" height="14" fill="var(--y)"/>
-        <text class="shape-tip" x="1430" y="850" text-anchor="middle">sessions / hr</text>
+      <g class="shape" data-signal="citizen" data-shape-id="c1" data-orbit="1">
+        <circle cx="0" cy="0" r="22" fill="var(--y)"/>
+        <text class="shape-tip" x="0" y="42" text-anchor="middle">citizen 2</text>
+      </g>
+      <g class="shape" data-signal="citizen" data-shape-id="c2" data-orbit="2">
+        <circle cx="0" cy="0" r="22" fill="var(--y)"/>
+        <text class="shape-tip" x="0" y="42" text-anchor="middle">citizen 3</text>
+      </g>
+      <g class="shape" data-signal="citizen-slot" data-shape-id="c3" data-orbit="3">
+        <circle cx="0" cy="0" r="10" fill="var(--y)" opacity="0.18"/>
+      </g>
+      <g class="shape" data-signal="citizen-slot" data-shape-id="c4" data-orbit="4">
+        <circle cx="0" cy="0" r="10" fill="var(--y)" opacity="0.18"/>
+      </g>
+      <g class="shape" data-signal="citizen-slot" data-shape-id="c5" data-orbit="5">
+        <circle cx="0" cy="0" r="10" fill="var(--y)" opacity="0.18"/>
+      </g>
+      <g class="shape" data-signal="citizen-slot" data-shape-id="c6" data-orbit="6">
+        <circle cx="0" cy="0" r="10" fill="var(--y)" opacity="0.18"/>
+      </g>
+      <g class="shape" data-signal="citizen-slot" data-shape-id="c7" data-orbit="7">
+        <circle cx="0" cy="0" r="10" fill="var(--y)" opacity="0.18"/>
       </g>
 
-      <!-- Active triangle: rotates while a session is active -->
+      <!-- Sessions today rail — a literal bar chart on the left, ticks for each session today. -->
+      <g class="shape" data-signal="session-today-axis" data-shape-id="st-axis">
+        <line x1="100" y1="780" x2="100" y2="220" stroke="var(--y)" stroke-width="1" opacity="0.35"/>
+        <text class="shape-tip" font-family="var(--mono)" font-size="10" letter-spacing="2" fill="var(--y-dim)" x="100" y="810" text-anchor="middle">SESSIONS TODAY</text>
+      </g>
+      <g class="shape" data-signal="session-today-fill" data-shape-id="st-fill">
+        <line x1="100" y1="780" x2="100" y2="780" stroke="var(--y)" stroke-width="3"/>
+      </g>
+
+      <!-- Sessions this hour rail — mirror on the right. -->
+      <g class="shape" data-signal="session-hour-axis" data-shape-id="sh-axis">
+        <line x1="1500" y1="780" x2="1500" y2="220" stroke="var(--y)" stroke-width="1" opacity="0.35"/>
+        <text class="shape-tip" font-family="var(--mono)" font-size="10" letter-spacing="2" fill="var(--y-dim)" x="1500" y="810" text-anchor="middle">SESSIONS / HR</text>
+      </g>
+      <g class="shape" data-signal="session-hour-fill" data-shape-id="sh-fill">
+        <line x1="1500" y1="780" x2="1500" y2="780" stroke="var(--y)" stroke-width="3"/>
+      </g>
+
+      <!-- Active beacon: the triangle is now the literal "thinking" indicator at the top.
+           When sessions are active it rotates and pulses; otherwise it sits still. -->
       <g class="shape" data-signal="active" data-shape-id="t">
         <polygon points="800,80 836,144 764,144" fill="var(--y)"/>
         <text class="shape-tip" x="800" y="170" text-anchor="middle">thinking</text>
       </g>
 
-      <!-- Recent activity: small dots fade in/out with pulse -->
-      <g class="shape" data-signal="pulse" data-shape-id="p1">
-        <circle cx="120" cy="500" r="14" fill="var(--y)"/>
+      <!-- Pulse arcs: 4 concentric arcs that bloom from the center on activity.
+           These replace the random pulse dots. They're synced to recent_pulse. -->
+      <g class="shape" data-signal="pulse-arc" data-shape-id="pa1">
+        <circle cx="800" cy="500" r="200" fill="none" stroke="var(--y)" stroke-width="1.5" stroke-dasharray="4 12" opacity="0.4"/>
       </g>
-      <g class="shape" data-signal="pulse" data-shape-id="p2">
-        <circle cx="1480" cy="540" r="14" fill="var(--y)"/>
+      <g class="shape" data-signal="pulse-arc" data-shape-id="pa2">
+        <circle cx="800" cy="500" r="280" fill="none" stroke="var(--y)" stroke-width="1" stroke-dasharray="2 18" opacity="0.3"/>
       </g>
-      <g class="shape" data-signal="pulse" data-shape-id="p3">
-        <circle cx="1430" cy="430" r="6" fill="var(--y)"/>
-      </g>
-      <g class="shape" data-signal="pulse" data-shape-id="p4">
-        <circle cx="170" cy="430" r="6" fill="var(--y)"/>
+      <g class="shape" data-signal="pulse-arc" data-shape-id="pa3">
+        <circle cx="800" cy="500" r="460" fill="none" stroke="var(--y)" stroke-width="0.6" stroke-dasharray="1 28" opacity="0.18"/>
       </g>
 
-      <!-- Last-email indicator -->
+      <!-- Last-email well: square that brightens with freshness, positioned at bottom center -->
       <g class="shape" data-signal="last-email" data-shape-id="le">
         <rect x="780" y="900" width="40" height="40" fill="var(--y)"/>
         <text class="shape-tip" x="800" y="970" text-anchor="middle">last received</text>
       </g>
 
-      <!-- Decorative anchors (also drift) -->
-      <g class="shape" data-signal="decor" data-shape-id="d1">
-        <rect x="1430" y="430" width="100" height="2" fill="var(--y)"/>
+      <!-- Corner markers: literal compass-style anchors, not decorative drift -->
+      <g class="shape" data-signal="corner" data-shape-id="cn1">
+        <line x1="60" y1="60" x2="120" y2="60" stroke="var(--y)" stroke-width="1.5" opacity="0.5"/>
+        <line x1="60" y1="60" x2="60" y2="120" stroke="var(--y)" stroke-width="1.5" opacity="0.5"/>
       </g>
-      <g class="shape" data-signal="decor" data-shape-id="d2">
-        <rect x="70" y="430" width="100" height="2" fill="var(--y)"/>
+      <g class="shape" data-signal="corner" data-shape-id="cn2">
+        <line x1="1540" y1="60" x2="1480" y2="60" stroke="var(--y)" stroke-width="1.5" opacity="0.5"/>
+        <line x1="1540" y1="60" x2="1540" y2="120" stroke="var(--y)" stroke-width="1.5" opacity="0.5"/>
       </g>
-      <g class="shape" data-signal="decor" data-shape-id="d3">
-        <polygon points="200,920 230,920 215,940" fill="var(--y)"/>
+      <g class="shape" data-signal="corner" data-shape-id="cn3">
+        <line x1="60" y1="940" x2="120" y2="940" stroke="var(--y)" stroke-width="1.5" opacity="0.5"/>
+        <line x1="60" y1="940" x2="60" y2="880" stroke="var(--y)" stroke-width="1.5" opacity="0.5"/>
       </g>
-      <g class="shape" data-signal="decor" data-shape-id="d4">
-        <polygon points="1380,920 1410,920 1395,940" fill="var(--y)"/>
+      <g class="shape" data-signal="corner" data-shape-id="cn4">
+        <line x1="1540" y1="940" x2="1480" y2="940" stroke="var(--y)" stroke-width="1.5" opacity="0.5"/>
+        <line x1="1540" y1="940" x2="1540" y2="880" stroke="var(--y)" stroke-width="1.5" opacity="0.5"/>
       </g>
     </svg>
   </div>
+
+  <!-- Sparks layer — colored particle bursts on real events -->
+  <div class="sparks" data-sparks aria-hidden="true"></div>
 
   <!-- MAYOR -->
   <h1 class="mayor-wrap" aria-label="Mayor">
