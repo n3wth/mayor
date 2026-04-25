@@ -105,19 +105,7 @@ export function initMotion(gsap) {
     letterPos.set(l, { cx, cy });
   });
 
-  if (!reduced) {
-    const breathConfigs = [
-      { yPercent: 0.6, dur: 4.4, delay: 0.0 },
-      { rotation: 1.0, dur: 3.6, delay: 0.3 },
-      { scaleY: 1.02,  dur: 2.8, delay: 0.6 },
-      { rotation: -1.4, dur: 5.2, delay: 0.2 },
-      { yPercent: -1.2, dur: 1.9, delay: 0.7 },
-    ];
-    letters.forEach((l, i) => {
-      const cfg = breathConfigs[i] || breathConfigs[0];
-      gsap.to(l, { ...cfg, ease: E.inOut, yoyo: true, repeat: -1 });
-    });
-  }
+  // Letters sit still by default. They only move on real events (delightLetter).
 
   // Letter delight: pick a random letter, do a happy hop, emit colored
   // sparks tangent to it in a fountain. Used on real events (new email,
@@ -239,20 +227,6 @@ export function initMotion(gsap) {
     }
     live.set(key, { el: blob, kind: "session", x, y });
 
-    // Subtle ambient breath, unique per object.
-    if (!reduced) {
-      const rand = mulberry32(seed * 41 + 7);
-      const dur = 3 + rand() * 3;
-      const delay = rand() * dur;
-      gsap.to(blob, {
-        attr: { r: targetR * 1.18 },
-        duration: dur,
-        ease: E.inOut,
-        yoyo: true,
-        repeat: -1,
-        delay,
-      });
-    }
   }
 
   function despawnSession(key) {
@@ -298,14 +272,6 @@ export function initMotion(gsap) {
         { attr: { r: 0 } },
         { attr: { r: targetR }, duration: 1.6, ease: E.bounce, overwrite: "auto" }
       );
-      gsap.to(c, {
-        attr: { r: targetR * 1.12 },
-        duration: 4,
-        ease: E.inOut,
-        yoyo: true,
-        repeat: -1,
-        delay: idx * 0.3,
-      });
     }
     live.set(key, { el: c, kind: "citizen", idx, x, y });
   }
