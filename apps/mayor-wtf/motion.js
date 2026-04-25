@@ -721,6 +721,107 @@ function pluck(note, when = 0, vel = 0.7) {
   } catch {}
 }
 
+// ── MELODY PAINT TRAIL ───────────────────────────────────────────────────
+// Hold shift, drag → paint a melody. The drag path leaves a glowing yellow
+// line that fades over ~1.5s. Self trails are yellow, peer trails are white
+// (so multiple painters in the room remain visually distinct). Built on a
+// dedicated SVG overlay so each segment is a real path that can be styled
+// individually (stroke, opacity) without per-frame canvas redraws.
+function initPaint() {
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("class", "paint");
+  svg.setAttribute("aria-hidden", "true");
+  svg.style.cssText = [
+    "position:fixed",
+    "inset:0",
+    "width:100%",
+    "height:100%",
+    "z-index:5",
+    "pointer-events:none",
+  ].join(";");
+  document.body.appendChild(svg);
+
+  // Each segment: { el, t0, life, self }
+  const segments = [];
+  const MAX = 240;
+  const LIFE = 1500; // ms; trail fully fades by this age
+
+  // Per-source last-point cache so we draw continuous segments instead of
+  // disconnected dots. Key by source ("self" or peer's `from` id).
+  const lastBySource = new Map();
+
+  let raf = 0;
+  let paused = false;
+  document.addEventListener("visibilitychange", () => { paused = document.hidden; });
+
+  function tick() {
+    if (!paused) {
+      const now = performance.now();
+      for (let i = segments.length - 1; i >= 0; i--) {
+        const s = segments[i];
+        const age = now - s.t0;
+        if (age >= s.life) {
+          if (s.el && s.el.parentNode) s.el.parentNode.removeChild(s.el);
+          segments.splice(i, 1);
+          continue;
+        }
+        // Linear fade. Stroke width tapers slightly as it fades.
+        const t = age / s.life;
+        const alpha = (1 - t) * (s.self ? 0.95 : 0.85);
+        s.el.setAttribute("stroke-opacity", alpha.toFixed(3));
+      }
+    }
+    raf = requestAnimationFrame(tick);
+  }
+  raf = requestAnimationFrame(tick);
+
+  function pushSegment(x1, y1, x2, y2, self) {
+    const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
+    line.setAttribute("x1", x1.toFixed(1));
+    line.setAttribute("y1", y1.toFixed(1));
+    line.setAttribute("x2", x2.toFixed(1));
+    line.setAttribute("y2", y2.toFixed(1));
+    line.setAttribute("stroke", self ? "#f0d72a" : "#ffffff");
+    line.setAttribute("stroke-width", self ? "3" : "2.4");
+    line.setAttribute("stroke-linecap", "round");
+    line.setAttribute("stroke-opacity", self ? "0.95" : "0.85");
+    // Glow: layered drop-shadow via SVG filter would be heavy at scale.
+    // Cheaper: rely on the stroke color + the underlying field bloom.
+    svg.appendChild(line);
+    segments.push({ el: line, t0: performance.now(), life: LIFE, self });
+    if (segments.length > MAX) {
+      const old = segments.shift();
+      if (old.el && old.el.parentNode) old.el.parentNode.removeChild(old.el);
+    }
+  }
+
+  return {
+    // Begin a new self stroke — clears self's last point so the next
+    // addSelfPoint starts a fresh path (no leftover seam from prior drag).
+    beginSelf: () => { lastBySource.set("self", null); },
+    addSelfPoint: (x, y) => {
+      const last = lastBySource.get("self");
+      if (last) pushSegment(last.x, last.y, x, y, true);
+      lastBySource.set("self", { x, y });
+    },
+    endSelf: () => { lastBySource.set("self", null); },
+    addPeerPoint: (from, x, y) => {
+      const key = "peer:" + from;
+      const last = lastBySource.get(key);
+      if (last && (performance.now() - last.t) < 600) {
+        pushSegment(last.x, last.y, x, y, false);
+      }
+      lastBySource.set(key, { x, y, t: performance.now() });
+    },
+    destroy: () => {
+      cancelAnimationFrame(raf);
+      if (svg.parentNode) svg.parentNode.removeChild(svg);
+      segments.length = 0;
+      lastBySource.clear();
+    },
+  };
+}
+
 // ── ENTRY POINT ──────────────────────────────────────────────────────────
 export function initMotion(gsap) {
   if (!gsap) return { destroy: () => {} };
@@ -752,13 +853,14 @@ export function initMotion(gsap) {
   let lastInteractionAt = Date.now();
   let lastClick = null;
 
-  let fieldHandle = null, starsHandle = null, auroraHandle = null, ripplesHandle = null, trailHandle = null;
+  let fieldHandle = null, starsHandle = null, auroraHandle = null, ripplesHandle = null, trailHandle = null, paintHandle = null;
   if (!reduced) {
     fieldHandle = initField(fieldCanvas);
     starsHandle = initStars(starsCanvas, () => soundOn);
     auroraHandle = initAurora(auroraCanvas);
     trailHandle = initTrail(trailCanvas);
     ripplesHandle = initRipples(ripplesCanvas);
+    paintHandle = initPaint();
   }
 
   // ── SHARED HEARTBEAT ───────────────────────────────────────────────────
@@ -1019,6 +1121,10 @@ export function initMotion(gsap) {
   // Local click — fan out to peers + render locally.
   function onStageClick(e) {
     if (e.target.closest("a, .sound")) return;
+    // Shift-click is a paint stroke; the paint handler owns the audio + trail.
+    // Skip the regular click ripple so the two features don't fire on top of
+    // each other (and so a brief shift-click doesn't accidentally drop a note).
+    if (e.shiftKey) return;
     lastInteractionAt = Date.now();
     lastClick = {
       x: e.clientX,
@@ -1496,6 +1602,16 @@ export function initMotion(gsap) {
             applyStepFromPeer(ev.letter, ev.idx | 0, !!ev.on);
             return;
           }
+          // Peer paint stroke — render their trail in white + soft note.
+          if (ev.type === "paint") {
+            const px = (ev.x ?? 0.5) * window.innerWidth;
+            const py = (ev.y ?? 0.5) * window.innerHeight;
+            if (paintHandle) paintHandle.addPeerPoint(ev.from, px, py);
+            if (soundOn && pluckSynth && typeof ev.note === "string" && ev.note) {
+              try { pluck(ev.note, 0, 0.32); } catch {}
+            }
+            return;
+          }
           if (ev.type === "click" || ev.type === "tab") {
             const x = (ev.x ?? 0.5) * window.innerWidth;
             const y = (ev.y ?? 0.5) * window.innerHeight;
@@ -1519,6 +1635,124 @@ export function initMotion(gsap) {
     }
   }
   connectSync();
+
+  // ── MELODY PAINT ─────────────────────────────────────────────────────
+  // Hold shift, drag → continuous melody. Cursor X picks a pentatonic note
+  // (5 choices across the screen), Y picks octave (top half = +1). Plucks
+  // are throttled to ~12/sec; the trail is broadcast in chunks so peers
+  // see the painted line and hear the melody at the same time.
+  // PENT[11..15] = C5, D5, E5, G5, A5 — five clean choices, top of scale.
+  // Top half of the viewport bumps the octave by 1 (C6, D6, E6, G6, A6).
+  const PAINT_NOTES = ["C5", "D5", "E5", "G5", "A5"];
+  function bumpOctave(note) {
+    // note is e.g. "C5" or "G5" — bump the trailing digit by 1.
+    return note.replace(/(\d)$/, (_, d) => String(Math.min(8, parseInt(d, 10) + 1)));
+  }
+  function noteForPaint(clientX, clientY) {
+    const five = Math.max(0, Math.min(4, Math.floor((clientX / window.innerWidth) * 5)));
+    const base = PAINT_NOTES[five];
+    return clientY < window.innerHeight / 2 ? bumpOctave(base) : base;
+  }
+
+  let shiftHeld = false;
+  let painting = false;
+  let lastPaintAt = 0;
+  let lastPaintBroadcastAt = 0;
+  let lastPaintPos = null; // { x, y, t } — for velocity scaling
+  const PAINT_THROTTLE = 80; // ms — ~12.5 plucks/sec max (local audio)
+  const PAINT_BROADCAST = 170; // ms — ~5.9/sec (under server's 6/sec cap)
+
+  // Track shift via keyboard so the body class can switch the cursor + give
+  // a visual "you're armed to paint" affordance even before drag starts.
+  window.addEventListener("keydown", (e) => {
+    if (e.key === "Shift" && !shiftHeld) {
+      shiftHeld = true;
+      document.body.classList.add("painting");
+    }
+  });
+  window.addEventListener("keyup", (e) => {
+    if (e.key === "Shift") {
+      shiftHeld = false;
+      document.body.classList.remove("painting");
+      // Releasing shift mid-drag ends the paint stroke cleanly.
+      if (painting) {
+        painting = false;
+        if (paintHandle) paintHandle.endSelf();
+      }
+    }
+  });
+  // Catch the case where the tab loses focus while shift is "held" — the
+  // OS may swallow the keyup. Reset on blur so the body class doesn't stick.
+  window.addEventListener("blur", () => {
+    if (shiftHeld) {
+      shiftHeld = false;
+      document.body.classList.remove("painting");
+    }
+    if (painting) {
+      painting = false;
+      if (paintHandle) paintHandle.endSelf();
+    }
+  });
+
+  function onPaintDown(e) {
+    if (!shiftHeld || reduced || !paintHandle) return;
+    painting = true;
+    lastPaintAt = 0;
+    lastPaintPos = { x: e.clientX, y: e.clientY, t: performance.now() };
+    paintHandle.beginSelf();
+    paintHandle.addSelfPoint(e.clientX, e.clientY);
+  }
+  function onPaintMove(e) {
+    if (!painting || !paintHandle) return;
+    // Always extend the local trail visually — the drag should feel solid.
+    paintHandle.addSelfPoint(e.clientX, e.clientY);
+    const now = performance.now();
+    if (now - lastPaintAt < PAINT_THROTTLE) return;
+
+    // Velocity scales pluck velocity: faster drags = louder, more present.
+    let speed = 0;
+    if (lastPaintPos) {
+      const dx = e.clientX - lastPaintPos.x;
+      const dy = e.clientY - lastPaintPos.y;
+      const dt = Math.max(1, now - lastPaintPos.t);
+      speed = Math.hypot(dx, dy) / dt; // px/ms
+    }
+    // Map speed (0..2 px/ms typical) → velocity (0.35..0.85).
+    const vel = Math.max(0.35, Math.min(0.85, 0.35 + speed * 0.4));
+    lastPaintAt = now;
+    lastPaintPos = { x: e.clientX, y: e.clientY, t: now };
+
+    const note = noteForPaint(e.clientX, e.clientY);
+    if (soundOn && pluckSynth) pluck(note, 0, vel);
+
+    // Broadcast in chunks — slower than local plucks so we stay under the
+    // server's 6 events/sec/IP rate cap. Peers still see a smooth line
+    // because their `addPeerPoint` connects each broadcast hop.
+    if (now - lastPaintBroadcastAt >= PAINT_BROADCAST) {
+      lastPaintBroadcastAt = now;
+      fetch(`${SYNC_BASE}/event`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          type: "paint",
+          x: e.clientX / window.innerWidth,
+          y: e.clientY / window.innerHeight,
+          note,
+          from: SELF_ID,
+        }),
+        keepalive: true,
+      }).catch(() => {});
+    }
+  }
+  function onPaintUp() {
+    if (!painting) return;
+    painting = false;
+    if (paintHandle) paintHandle.endSelf();
+  }
+  window.addEventListener("pointerdown", onPaintDown);
+  window.addEventListener("pointermove", onPaintMove, { passive: true });
+  window.addEventListener("pointerup", onPaintUp);
+  window.addEventListener("pointercancel", onPaintUp);
 
   // ── STATS poll for field intensity (subtle background warmth) ──
   let lastStats = null;
@@ -1858,6 +2092,7 @@ export function initMotion(gsap) {
     if (auroraHandle) auroraHandle.destroy();
     if (trailHandle) trailHandle.destroy();
     if (ripplesHandle) ripplesHandle.destroy();
+    if (paintHandle) paintHandle.destroy();
     if (es) { try { es.close(); } catch {} }
     gsap.killTweensOf("*");
   };
@@ -1875,6 +2110,7 @@ export function initMotion(gsap) {
       if (auroraHandle) auroraHandle.destroy();
       if (trailHandle) trailHandle.destroy();
       if (ripplesHandle) ripplesHandle.destroy();
+      if (paintHandle) paintHandle.destroy();
       if (es) { try { es.close(); } catch {} }
       window.removeEventListener("pagehide", onPageHide);
       gsap.killTweensOf("*");
