@@ -2852,9 +2852,52 @@ export function initMotion(gsap) {
   window.addEventListener("pointerup", onPaintUp);
   window.addEventListener("pointercancel", onPaintUp);
 
-  // ── STATS poll for field intensity (subtle background warmth) ──
+  // ── STATS poll for field intensity + chronicle ──
+  // The Mayor is a real autonomous agent doing real work. Poll its activity
+  // and surface it: live count of sessions today, last activity age,
+  // and a one-line chronicle ("the mayor wrote N · 4m ago").
   let lastStats = null;
   let statsIntensity = 0;
+  const chronicleEl = document.querySelector("[data-chronicle]");
+  function relAge(ageMs) {
+    const s = Math.round(ageMs / 1000);
+    if (s < 60) return `${s}s ago`;
+    if (s < 3600) return `${Math.round(s / 60)}m ago`;
+    if (s < 86400) return `${Math.round(s / 3600)}h ago`;
+    return `${Math.round(s / 86400)}d ago`;
+  }
+  function updateChronicle(s) {
+    if (!chronicleEl) return;
+    if (s && Array.isArray(s.chronicle) && s.chronicle.length) {
+      const e = s.chronicle[0];
+      const initial = e.initial && e.initial !== "_" ? e.initial : "someone";
+      const ago = relAge(e.ageMs);
+      const total = s.sessions_today || 0;
+      chronicleEl.innerHTML =
+        `the mayor wrote <span class="accent">${initial}</span> · ${ago} · ${total} sessions today`;
+      chronicleEl.classList.add("shown");
+    } else if (s && s.last_email_age_seconds != null) {
+      chronicleEl.innerHTML =
+        `last received <span class="accent">${relAge(s.last_email_age_seconds * 1000)}</span> · ${s.sessions_today || 0} sessions today`;
+      chronicleEl.classList.add("shown");
+    } else {
+      chronicleEl.classList.remove("shown");
+    }
+  }
+
+  // Cathedral bell: when sessions_today increments between polls, a real
+  // email just arrived. Play a deep, distinct bell — not a chime, not a
+  // beat. This is REAL ACTIVITY, not noise generation.
+  function cathedralBell() {
+    if (!soundOn || !window.Tone) return;
+    try {
+      // Use the existing pluck synth but lower octave + bigger reverb.
+      pluck("A1", 0, 0.85);
+      pluck("E2", 0.08, 0.7);
+      pluck("A2", 0.16, 0.55);
+    } catch {}
+  }
+
   async function pollStats() {
     try {
       const res = await fetch("/api/stats", { cache: "no-cache" });
@@ -2871,6 +2914,15 @@ export function initMotion(gsap) {
       })();
       const activeScore = Math.min(1, (s.active_sessions || 0) / 3);
       statsIntensity = Math.min(1, 0.45 * pulse + 0.35 * activeScore + 0.20 * ageScore);
+
+      // Detect new email — sessions_today went up since last poll. First
+      // poll establishes baseline; subsequent increments ring the bell.
+      if (lastStats && (s.sessions_today || 0) > (lastStats.sessions_today || 0)) {
+        cathedralBell();
+        // Strong field pulse from the centre — visible to everyone in tab
+        if (fieldHandle) fieldHandle.triggerPulse(0.5, 0.5);
+      }
+      updateChronicle(s);
       lastStats = s;
     } catch {}
   }

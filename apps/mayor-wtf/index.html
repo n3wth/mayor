@@ -273,6 +273,31 @@
     .seq { width: 94vw; padding: 6px 8px; }
   }
 
+  /* Chronicle — the real Mayor's recent activity, surfacing as a quiet
+     line at the top of the page. Implicit. Updates every minute. */
+  .chronicle {
+    position: fixed;
+    top: clamp(48px, 6vw, 64px);
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 14;
+    pointer-events: none;
+    font-family: var(--mono);
+    font-size: clamp(10px, 0.95vw, 11px);
+    color: rgba(255,255,255,0.45);
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    text-align: center;
+    transition: opacity .8s ease;
+    opacity: 0;
+    max-width: 90vw;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .chronicle.shown { opacity: 1; }
+  .chronicle .accent { color: rgba(255, 220, 80, 0.7); }
+
   /* TUNNEL — full-screen 3D world overlay. Hidden by default. When active,
      it covers the page; the room behind dims to ~5%. Built on three.js. */
   .tunnel {
@@ -412,6 +437,9 @@
   <div class="cursor-dot" data-cursor-dot aria-hidden="true"></div>
 
 </div>
+
+<!-- Chronicle of the mayor's actual recent work -->
+<div class="chronicle" data-chronicle aria-hidden="true"></div>
 
 <!-- 3D tunnel overlay. Sits outside .stage so the dim doesn't cascade. -->
 <div class="tunnel" data-tunnel aria-hidden="true">

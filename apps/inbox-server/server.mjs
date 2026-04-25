@@ -179,6 +179,29 @@ function computeStats() {
     }
   } catch {}
 
+  // Chronicle: last 6 sessions, with a hashed sender id so peers see
+  // *something happened* without us leaking emails.
+  // Citizen handles are surfaced loosely too — first letter of handle.
+  stats.chronicle = [];
+  stats.last_citizen_initial = null;
+  try {
+    const logsDir = join(GT, ".runtime/email-sessions/logs");
+    if (existsSync(logsDir)) {
+      const files = readdirSync(logsDir).sort().slice(-6).reverse();
+      for (const f of files) {
+        // file format: 20260425T040934Z-chris.renfro_ucbcomedy.com.log
+        const m = f.match(/^(\d{8})T(\d{6})Z-(.+)\.log$/);
+        if (!m) continue;
+        const handle = m[3].split("_")[0];
+        const initial = handle.charAt(0).toUpperCase();
+        const tsIso = `${m[1].slice(0,4)}-${m[1].slice(4,6)}-${m[1].slice(6,8)}T${m[2].slice(0,2)}:${m[2].slice(2,4)}:${m[2].slice(4,6)}Z`;
+        const ageMs = Date.now() - Date.parse(tsIso);
+        stats.chronicle.push({ at: tsIso, ageMs, initial });
+      }
+      if (stats.chronicle[0]) stats.last_citizen_initial = stats.chronicle[0].initial;
+    }
+  } catch {}
+
   return stats;
 }
 
