@@ -380,6 +380,47 @@ export function initMotion(gsap) {
     ripplesHandle = initRipples(ripplesCanvas);
   }
 
+  // ── SHARED HEARTBEAT ───────────────────────────────────────────────────
+  // Every visitor's halo, the .corner .live pin, and the field shader pulse
+  // sync to the same global tick. Beat period scales with presence: more
+  // people in the room → faster, lighter pulse.
+  let serverClockOffset = 0; // ms. server_now = Date.now() + offset
+  let serverClockSynced = false;
+  let presenceCount = 1;
+  let lastTick = -1;
+  let haloHovering = false; // set true while cursor is over an interactive
+  const liveEl = document.querySelector(".corner .live");
+  function beatPeriodMs() {
+    const n = Math.max(1, presenceCount | 0);
+    return Math.max(700, Math.min(1200, 1200 - 100 * (n - 1)));
+  }
+  const heartbeatInterval = reduced ? null : setInterval(() => {
+    const period = beatPeriodMs();
+    const tick = Math.floor((Date.now() + serverClockOffset) / period);
+    if (tick === lastTick) return;
+    if (lastTick === -1) { lastTick = tick; return; } // skip first to avoid burst
+    lastTick = tick;
+    // Halo pulse — gentle. Skip while hovering so hover scale wins.
+    if (halo && !haloHovering) {
+      gsap.fromTo(halo,
+        { scale: 1 },
+        { scale: 1.2, duration: 0.18, ease: "power2.out", overwrite: "auto" }
+      );
+      gsap.to(halo, { scale: 1, duration: 0.4, ease: "power2.inOut", delay: 0.18, overwrite: false });
+    }
+    // .corner .live pin — same rhythm.
+    if (liveEl) {
+      gsap.fromTo(liveEl,
+        { scale: 1 },
+        { scale: 1.2, duration: 0.18, ease: "power2.out", overwrite: "auto" }
+      );
+      gsap.to(liveEl, { scale: 1, duration: 0.4, ease: "power2.inOut", delay: 0.18, overwrite: false });
+    }
+    // Field shader: subtle centered ring. Click pulses overwrite when
+    // they happen — that's fine; clicks should be louder than the metronome.
+    if (fieldHandle) fieldHandle.triggerPulse(0.5, 0.5);
+  }, 200);
+
   // ── ENTRANCE: hero swells in from below, slowly. The pause before sound. ──
   if (!reduced) {
     gsap.set(letters, { yPercent: 110, opacity: 0 });
@@ -426,8 +467,14 @@ export function initMotion(gsap) {
     }, { passive: true });
 
     document.querySelectorAll(".cta, .corner a, .sound").forEach((el) => {
-      el.addEventListener("pointerenter", () => gsap.to(halo, { scale: 1.5, duration: 0.4, ease: "power3.out" }));
-      el.addEventListener("pointerleave", () => gsap.to(halo, { scale: 1, duration: 0.5, ease: "power3.out" }));
+      el.addEventListener("pointerenter", () => {
+        haloHovering = true;
+        gsap.to(halo, { scale: 1.5, duration: 0.4, ease: "power3.out", overwrite: "auto" });
+      });
+      el.addEventListener("pointerleave", () => {
+        haloHovering = false;
+        gsap.to(halo, { scale: 1, duration: 0.5, ease: "power3.out", overwrite: "auto" });
+      });
     });
   }
 
@@ -534,12 +581,21 @@ export function initMotion(gsap) {
       es.onmessage = (msg) => {
         try {
           const ev = JSON.parse(msg.data);
+          // First SSE message: pin client clock to server clock so all
+          // visitors share the same tick boundary.
+          if (!serverClockSynced) {
+            if (typeof ev.ts === "number") {
+              serverClockOffset = ev.ts - Date.now();
+            }
+            serverClockSynced = true;
+          }
           if (ev.type === "presence") {
+            const n = ev.count || 1;
+            presenceCount = n;
             if (presenceEl) {
-              const n = ev.count || 1;
               presenceEl.textContent = n === 1 ? "alone in the room" : `${n} in the room`;
             }
-            if (starsHandle) starsHandle.setCount(ev.count || 1);
+            if (starsHandle) starsHandle.setCount(n);
             return;
           }
           if (ev.from === SELF_ID) return;
@@ -595,6 +651,7 @@ export function initMotion(gsap) {
   // ── CLEANUP ──
   const onPageHide = () => {
     clearInterval(pollInterval);
+    if (heartbeatInterval) clearInterval(heartbeatInterval);
     if (fieldHandle) fieldHandle.destroy();
     if (starsHandle) starsHandle.destroy();
     if (ripplesHandle) ripplesHandle.destroy();
@@ -605,6 +662,7 @@ export function initMotion(gsap) {
   return {
     destroy: () => {
       clearInterval(pollInterval);
+      if (heartbeatInterval) clearInterval(heartbeatInterval);
       if (fieldHandle) fieldHandle.destroy();
       if (starsHandle) starsHandle.destroy();
       if (ripplesHandle) ripplesHandle.destroy();
