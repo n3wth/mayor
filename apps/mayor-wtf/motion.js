@@ -31,6 +31,8 @@ function initField(canvas) {
     uniform vec2 u_mouse;
     uniform vec2 u_pulse;
     uniform float u_pulseAge;
+    uniform float u_psy;     // 0..1 — psychedelic depth (drifts over time)
+    uniform float u_chaos;   // 0..1 — chaos burst (event-driven, decays fast)
 
     float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
     float noise(vec2 p) {
@@ -48,12 +50,28 @@ function initField(canvas) {
       return v;
     }
 
+    // Hue rotate via simple matrix.
+    vec3 hueShift(vec3 c, float h) {
+      const vec3 k = vec3(0.57735, 0.57735, 0.57735);
+      float cs = cos(h), sn = sin(h);
+      return c * cs + cross(k, c) * sn + k * dot(k, c) * (1.0 - cs);
+    }
+
     void main() {
       vec2 uv = gl_FragCoord.xy / u_res.xy;
       vec2 p = uv * 2.0 - 1.0;
       p.x *= u_res.x / u_res.y;
 
       float t = u_time * 0.025;
+
+      // Psychedelic warp: a slow rotation + radial breathing keyed to u_psy.
+      float ang = u_psy * sin(u_time * 0.13) * 0.6 + u_chaos * 1.4;
+      float ca = cos(ang), sa = sin(ang);
+      p = mat2(ca, -sa, sa, ca) * p;
+      float swirl = u_psy * 0.4 + u_chaos * 1.2;
+      float r = length(p);
+      p += vec2(-p.y, p.x) * sin(r * 4.0 - u_time * 0.6) * swirl * 0.15;
+
       vec2 well1 = vec2(sin(t * 0.7) * 0.55, cos(t * 0.5) * 0.30);
       vec2 well2 = vec2(cos(t * 0.6 + 1.7) * 0.65, sin(t * 0.4 + 0.4) * 0.45);
       float d1 = length(p - well1);
@@ -62,7 +80,7 @@ function initField(canvas) {
       float dm = length(p - m);
 
       vec2 q = vec2(fbm(p + t), fbm(p - t * 0.6));
-      float n = fbm(p * 1.5 + q * (0.4 + u_intensity * 0.4));
+      float n = fbm(p * 1.5 + q * (0.4 + u_intensity * 0.4 + u_psy * 0.6));
 
       vec3 deep = vec3(0.42, 0.36, 0.05);
       vec3 mid_ = vec3(0.78, 0.69, 0.12);
@@ -79,12 +97,23 @@ function initField(canvas) {
       float shade = 0.55 + n * 0.5;
       col *= shade;
 
-      // Click ripple — a slow expanding ring. Reads as PHYSICAL.
+      // Pulse ring (clicks)
       float pulseR = u_pulseAge * 0.85;
       vec2 pp = (u_pulse * 2.0 - 1.0) * vec2(u_res.x / u_res.y, 1.0);
       float pd = length(p - pp);
       float ring = exp(-pow((pd - pulseR) * 5.5, 2.0)) * exp(-u_pulseAge * 0.55);
       col += hi * ring * 0.55;
+
+      // Psychedelic hue shift — yellow stays anchor at u_psy=0, drifts otherwise.
+      float h = u_psy * 1.4 * sin(u_time * 0.07 + n * 4.0) + u_chaos * 3.0 * sin(u_time * 1.2 + r * 8.0);
+      col = hueShift(col, h);
+
+      // Chaos burst: glitchy color separation
+      if (u_chaos > 0.001) {
+        float gj = u_chaos * 0.15;
+        col.r *= 1.0 + sin(uv.y * 80.0 + u_time * 12.0) * gj;
+        col.b *= 1.0 - sin(uv.y * 80.0 + u_time * 12.0 + 1.5) * gj;
+      }
 
       float vig = smoothstep(1.8, 0.5, length(p));
       col *= mix(0.18, 1.0, vig);
@@ -127,6 +156,8 @@ function initField(canvas) {
     mouse: gl.getUniformLocation(prog, "u_mouse"),
     pulse: gl.getUniformLocation(prog, "u_pulse"),
     pulseAge: gl.getUniformLocation(prog, "u_pulseAge"),
+    psy: gl.getUniformLocation(prog, "u_psy"),
+    chaos: gl.getUniformLocation(prog, "u_chaos"),
   };
 
   const SCALE = 0.5;
@@ -140,7 +171,7 @@ function initField(canvas) {
   resize();
   window.addEventListener("resize", resize);
 
-  let state = { intensity: 0, mouse: [0.5, 0.5], pulse: [0.5, 0.5], pulseStart: -10 };
+  let state = { intensity: 0, mouse: [0.5, 0.5], pulse: [0.5, 0.5], pulseStart: -10, psy: 0, chaos: 0 };
   const t0 = performance.now();
   let raf = 0;
   let paused = false;
@@ -154,6 +185,10 @@ function initField(canvas) {
       gl.uniform2f(u.mouse, state.mouse[0], state.mouse[1]);
       gl.uniform2f(u.pulse, state.pulse[0], state.pulse[1]);
       gl.uniform1f(u.pulseAge, t - state.pulseStart);
+      gl.uniform1f(u.psy, state.psy);
+      gl.uniform1f(u.chaos, state.chaos);
+      // Chaos decays naturally each frame so the JS just bumps it.
+      state.chaos *= 0.94;
       gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
     }
     raf = requestAnimationFrame(tick);
@@ -163,6 +198,8 @@ function initField(canvas) {
   return {
     setIntensity: (v) => { state.intensity = Math.max(0, Math.min(1, v)); },
     setMouse: (x, y) => { state.mouse = [x, y]; },
+    setPsy: (v) => { state.psy = Math.max(0, Math.min(1, v)); },
+    triggerChaos: (v = 1) => { state.chaos = Math.max(state.chaos, Math.max(0, Math.min(1, v))); },
     triggerPulse: (x, y) => {
       state.pulse = [x, y];
       state.pulseStart = (performance.now() - t0) / 1000;
@@ -944,6 +981,120 @@ export function initMotion(gsap) {
       pluck("C4", 0, 0.5);
     }
   });
+
+  // ── PSYCHEDELIC ESCALATION + WEIRD EVENTS ────────────────────────────
+  // Psy rises slowly over time the user is on the page (capped at 0.55 by
+  // default). Clicking and chord activity nudges it up, idleness brings it
+  // down. Every 18-45s, a "weird event" fires — random hue burst, brief
+  // letter rotation, scale glitch, sound bend. Page never gets boring.
+  const visitStart = performance.now();
+  let psyTarget = 0;
+  let psyRaf = 0;
+  function psyTick() {
+    const dur = (performance.now() - visitStart) / 1000;
+    // Baseline rises with visit duration (asymptote 0.55 at ~10 min).
+    const baseline = Math.min(0.55, dur / 600);
+    psyTarget = Math.max(psyTarget * 0.998, baseline);
+    if (fieldHandle) {
+      const cur = fieldHandle.__psy ?? 0;
+      const next = cur + (psyTarget - cur) * 0.01;
+      fieldHandle.__psy = next;
+      fieldHandle.setPsy(next);
+    }
+    psyRaf = requestAnimationFrame(psyTick);
+  }
+  if (!reduced) psyRaf = requestAnimationFrame(psyTick);
+
+  // Catalogue of weird events. Each runs ~2s and leaves the page changed
+  // briefly. Fire ~every 20-50s.
+  const weirdEvents = [
+    // Color-bend: hue shifts + drone detunes for 1.5s.
+    () => {
+      psyTarget = Math.min(1, psyTarget + 0.35);
+      if (fieldHandle) fieldHandle.triggerChaos(0.4);
+      setTimeout(() => { psyTarget *= 0.6; }, 2000);
+    },
+    // Letters do a hover-and-spin
+    () => {
+      letters.forEach((l, i) => {
+        gsap.timeline()
+          .to(l, { rotationZ: 360, duration: 1.4, ease: "expo.inOut", delay: i * 0.08 })
+          .set(l, { rotationZ: 0 });
+      });
+      if (fieldHandle) fieldHandle.triggerChaos(0.5);
+    },
+    // Universe inverts briefly
+    () => {
+      gsap.fromTo("body", { filter: "invert(0)" }, { filter: "invert(1)", duration: 0.4, ease: "power2.inOut" });
+      gsap.to("body", { filter: "invert(0)", duration: 0.4, delay: 0.5, ease: "power2.inOut" });
+      if (soundOn) {
+        // discord chord
+        try { pluck("F#3", 0, 0.4); pluck("B3", 0.04, 0.4); pluck("D#4", 0.08, 0.4); } catch {}
+      }
+    },
+    // Hero scales briefly to the moon
+    () => {
+      gsap.fromTo(".hero", { scale: 1 }, { scale: 1.5, duration: 0.6, ease: "power3.out" });
+      gsap.to(".hero", { scale: 1, duration: 1.6, ease: "elastic.out(1, 0.5)", delay: 0.6 });
+      if (fieldHandle) fieldHandle.triggerChaos(0.6);
+    },
+    // Reality glitch — 4 quick pulses in different spots
+    () => {
+      for (let i = 0; i < 4; i++) {
+        setTimeout(() => {
+          const x = Math.random();
+          const y = Math.random();
+          if (fieldHandle) fieldHandle.triggerPulse(x, 1 - y);
+          if (ripplesHandle) ripplesHandle.add(x * window.innerWidth, y * window.innerHeight, false);
+          if (soundOn && pluckSynth) {
+            const n = PENT[Math.floor(Math.random() * PENT.length)];
+            pluck(n, 0, 0.3);
+          }
+        }, i * 90);
+      }
+      if (fieldHandle) fieldHandle.triggerChaos(0.8);
+    },
+    // Stars stretch into long streaks
+    () => {
+      const sl = document.querySelector(".stars");
+      if (sl) {
+        gsap.to(sl, { scaleY: 3, duration: 0.5, ease: "power2.in" });
+        gsap.to(sl, { scaleY: 1, duration: 1.2, ease: "elastic.out(1, 0.5)", delay: 0.5 });
+      }
+    },
+  ];
+  function fireWeird() {
+    if (reduced || document.hidden) {
+      setTimeout(fireWeird, 20000);
+      return;
+    }
+    const ev = weirdEvents[Math.floor(Math.random() * weirdEvents.length)];
+    try { ev(); } catch {}
+    setTimeout(fireWeird, 20000 + Math.random() * 30000);
+  }
+  setTimeout(fireWeird, 18000);
+
+  // ── DOOM CLOCK ─────────────────────────────────────────────────────────
+  // If 90 seconds pass with no click anywhere (locally — we use the existing
+  // lastInteractionAt tracker but lastClick presence as the marker), the
+  // page lurches into 5s of chaos: hue rotates fast, hero shudders, drone
+  // bends, then resolves back. Surprises long-idle visitors.
+  let doomFiredAt = 0;
+  setInterval(() => {
+    if (document.hidden || reduced) return;
+    const sinceClick = lastClick ? (Date.now() - lastInteractionAt) / 1000 : 0;
+    if (lastClick && sinceClick > 90 && Date.now() - doomFiredAt > 60000) {
+      doomFiredAt = Date.now();
+      psyTarget = 1;
+      if (fieldHandle) fieldHandle.triggerChaos(1);
+      gsap.fromTo(".hero", { x: 0 }, { x: 6, duration: 0.06, repeat: 60, yoyo: true, ease: "power2.inOut" });
+      if (soundOn) {
+        // descending dissonant arpeggio
+        ["C4", "B3", "A3", "G#3", "G3", "F#3", "F3"].forEach((n, i) => pluck(n, i * 0.08, 0.4));
+      }
+      setTimeout(() => { psyTarget *= 0.3; gsap.set(".hero", { x: 0 }); }, 5200);
+    }
+  }, 1000);
 
   // ── PRESENCE / SYNC via SSE ──
   let es = null;
