@@ -627,6 +627,13 @@ const CHORDS = [
   { root: "C", scale: ["C", "E", "G", "A", "D"], bass: "C2" },
   { root: "G", scale: ["G", "B", "D", "E", "A"], bass: "G1" },
 ];
+// "Conductor" support: map chord-card name → CHORDS index. Server uses "Am"
+// (with the "m" qualifier) for the minor i; CHORDS[0].root is "A".
+const CHORD_INDEX_BY_ROOT = { Am: 0, F: 1, C: 2, G: 3 };
+// When non-null, playStep + generative loops use this chord instead of the
+// auto-rotating cycle. Cleared when chord is "released" (currently never —
+// once conducted, the room stays on that chord until next conduct).
+let chordOverride = null;
 let bassSynth = null, leadSynth = null;
 let genLoop = null, bassLoop = null;
 let genActive = false;
@@ -703,6 +710,14 @@ function markovStep() {
   return leadIdx;
 }
 
+// Resolve the chord every loop tick: an explicit override beats the cycle.
+function currentGenChord(cycleIdx) {
+  if (chordOverride != null) {
+    return CHORDS[chordOverride] || CHORDS[0];
+  }
+  return CHORDS[cycleIdx % CHORDS.length];
+}
+
 function startGenerative() {
   if (!Tone || genActive) return;
   Tone.Transport.bpm.value = 64;
@@ -713,7 +728,7 @@ function startGenerative() {
   let chordIdx = 0;
   bassLoop = new Tone.Loop((time) => {
     if (!genActive) return;
-    const ch = CHORDS[chordIdx % CHORDS.length];
+    const ch = currentGenChord(chordIdx);
     // Bass on beat 1; only when 2+ visitors present.
     if (presenceForGen >= 2) bassSynth.triggerAttackRelease(ch.bass, "2n", time, 0.55);
     bar++;
@@ -723,7 +738,7 @@ function startGenerative() {
   // Lead Markov melody — eighth-note grid, restful.
   genLoop = new Tone.Loop((time) => {
     if (!genActive || presenceForGen < 1) return;
-    const ch = CHORDS[chordIdx % CHORDS.length];
+    const ch = currentGenChord(chordIdx);
     const step = markovStep();
     if (step < 0) return; // rest
     const scale = ch.scale;
@@ -735,6 +750,19 @@ function startGenerative() {
   }, "8n").start("4n");
 
   genActive = true;
+}
+
+// "Conduct" the room to a specific chord. Sets chordOverride and re-anchors
+// Tone.Transport to bar 0 so the new chord lands cleanly on the next bar.
+// Called from the chord-wheel UI and from inbound `chord` SSE events.
+function applyChord(root) {
+  if (!Object.prototype.hasOwnProperty.call(CHORD_INDEX_BY_ROOT, root)) return;
+  chordOverride = CHORD_INDEX_BY_ROOT[root];
+  // Re-anchor: snap transport position to bar 0 so the conducted chord
+  // owns the next downbeat instead of slicing into the current bar.
+  if (window.Tone && window.Tone.Transport) {
+    try { window.Tone.Transport.position = "0:0:0"; } catch {}
+  }
 }
 
 function stopGenerative() {
@@ -1536,8 +1564,14 @@ export function initMotion(gsap) {
   function playStep(L, when, vel = 0.7) {
     if (!Tone || !ensureVoices()) return;
     // Chord-aware notes for bass + lead — harmonized to current chord cycle.
-    const chordIdx = Math.floor((Tone.Transport.seconds || 0) / (60 / Tone.Transport.bpm.value * 4 * 8)) % CHORDS.length;
-    const ch = CHORDS[chordIdx] || CHORDS[0];
+    // If a "conductor" has set chordOverride, it wins over the rotating cycle.
+    let ch;
+    if (chordOverride != null) {
+      ch = CHORDS[chordOverride] || CHORDS[0];
+    } else {
+      const chordIdx = Math.floor((Tone.Transport.seconds || 0) / (60 / Tone.Transport.bpm.value * 4 * 8)) % CHORDS.length;
+      ch = CHORDS[chordIdx] || CHORDS[0];
+    }
     try {
       if (L === "M") voices.kick.triggerAttackRelease("C2", "8n", when, vel);
       else if (L === "A") voices.snare.triggerAttackRelease("16n", when, vel * 0.8);
@@ -1591,6 +1625,121 @@ export function initMotion(gsap) {
   function stopStepLoop() {
     if (stepLoop) { stepLoop.stop(); stepLoop.dispose(); stepLoop = null; }
   }
+
+  // ── CHORD CONDUCTOR ──────────────────────────────────────────────────
+  // Press 'c' to reveal a tiny 4-card chord wheel above the seq. Click a
+  // card to "conduct" — chordOverride flips, the transport re-anchors, and
+  // a `chord` event broadcasts so every peer re-anchors in lockstep.
+  const CHORD_CARDS = [
+    { name: "Am", label: "Am" },
+    { name: "F",  label: "F"  },
+    { name: "C",  label: "C"  },
+    { name: "G",  label: "G"  },
+  ];
+  let chordWheelEl = null;
+  let chordWheelOpen = false;
+  let currentChordName = "Am"; // tracks server-known chord; updated by SSE
+
+  function buildChordWheel() {
+    if (chordWheelEl) return chordWheelEl;
+    const wheel = document.createElement("div");
+    wheel.className = "chord-wheel";
+    wheel.setAttribute("role", "group");
+    wheel.setAttribute("aria-label", "Chord conductor");
+    wheel.style.cssText = [
+      "position:absolute",
+      "left:50%",
+      "transform:translateX(-50%) translateY(8px)",
+      "z-index:15",
+      "display:flex",
+      "gap:6px",
+      "padding:6px 8px",
+      "border-radius:10px",
+      "background:rgba(8,8,10,0.55)",
+      "-webkit-backdrop-filter:blur(14px)",
+      "backdrop-filter:blur(14px)",
+      "border:1px solid rgba(255,255,255,0.10)",
+      "pointer-events:auto",
+      "opacity:0",
+      "visibility:hidden",
+      "transition:opacity .14s ease, transform .14s ease",
+      "font-family:var(--mono, ui-monospace, monospace)",
+    ].join(";");
+    // Position above the seq: bottom-anchor near the seq's top edge.
+    if (seqEl) {
+      const rect = seqEl.getBoundingClientRect();
+      wheel.style.bottom = `calc(100vh - ${rect.top - 10}px)`;
+    } else {
+      wheel.style.bottom = "calc(96px + 14vh + 36px)";
+    }
+    for (const c of CHORD_CARDS) {
+      const card = document.createElement("button");
+      card.type = "button";
+      card.dataset.chord = c.name;
+      card.textContent = c.label;
+      card.setAttribute("aria-label", `Conduct chord ${c.name}`);
+      card.style.cssText = [
+        "min-width:42px",
+        "padding:8px 12px",
+        "border-radius:8px",
+        "border:1px solid rgba(255,255,255,0.14)",
+        "background:rgba(255,255,255,0.04)",
+        "color:#fff",
+        "font: 700 13px/1 var(--mono, ui-monospace, monospace)",
+        "letter-spacing:0.04em",
+        "cursor:pointer",
+        "transition:background .1s ease, border-color .1s ease, color .1s ease",
+      ].join(";");
+      card.addEventListener("click", (e) => {
+        e.stopPropagation();
+        applyChord(c.name);
+        currentChordName = c.name;
+        renderChordWheelState();
+        // Broadcast so peers re-anchor.
+        fetch(`${SYNC_BASE}/event`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ type: "chord", chord: c.name, from: SELF_ID }),
+          keepalive: true,
+        }).catch(() => {});
+      });
+      wheel.appendChild(card);
+    }
+    document.body.appendChild(wheel);
+    chordWheelEl = wheel;
+    return wheel;
+  }
+
+  function renderChordWheelState() {
+    if (!chordWheelEl) return;
+    const cards = chordWheelEl.querySelectorAll("[data-chord]");
+    cards.forEach((card) => {
+      const isActive = card.dataset.chord === currentChordName;
+      card.style.background = isActive ? "var(--y, #f0d72a)" : "rgba(255,255,255,0.04)";
+      card.style.borderColor = isActive ? "var(--y, #f0d72a)" : "rgba(255,255,255,0.14)";
+      card.style.color = isActive ? "#050505" : "#fff";
+      card.setAttribute("aria-pressed", isActive ? "true" : "false");
+    });
+  }
+
+  function setChordWheelOpen(open) {
+    if (open && !chordWheelEl) buildChordWheel();
+    chordWheelOpen = !!open;
+    if (!chordWheelEl) return;
+    chordWheelEl.style.visibility = chordWheelOpen ? "visible" : "hidden";
+    chordWheelEl.style.opacity = chordWheelOpen ? "1" : "0";
+    chordWheelEl.style.transform = `translateX(-50%) translateY(${chordWheelOpen ? "0" : "8"}px)`;
+    if (chordWheelOpen) renderChordWheelState();
+  }
+
+  // 'c' toggles the wheel — but stay out of the way of typing in inputs.
+  window.addEventListener("keydown", (e) => {
+    if (e.key !== "c" && e.key !== "C") return;
+    if (e.metaKey || e.ctrlKey || e.altKey) return;
+    const t = e.target;
+    if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
+    setChordWheelOpen(!chordWheelOpen);
+  });
 
   // Hook into existing toggleSound so the sequencer engages with audio.
   const _origStartGen = startGenerative;
@@ -1775,6 +1924,16 @@ export function initMotion(gsap) {
           // Grid snapshot — apply silently (no preview play).
           if (ev.type === "grid") {
             applyGrid(ev.grid);
+            return;
+          }
+          // Chord conductor — both initial snapshot and peer broadcasts.
+          // Self-echoes are fine (idempotent), so handle before the SELF_ID skip.
+          if (ev.type === "chord") {
+            if (typeof ev.chord === "string") {
+              applyChord(ev.chord);
+              currentChordName = ev.chord;
+              renderChordWheelState();
+            }
             return;
           }
           if (ev.from === SELF_ID) return;
@@ -2172,6 +2331,7 @@ export function initMotion(gsap) {
     if (trailHandle) trailHandle.destroy();
     if (ripplesHandle) ripplesHandle.destroy();
     if (es) { try { es.close(); } catch {} }
+    if (chordWheelEl) { try { chordWheelEl.remove(); } catch {} chordWheelEl = null; }
     gsap.killTweensOf("*");
   };
   window.addEventListener("pagehide", onPageHide);
@@ -2190,6 +2350,7 @@ export function initMotion(gsap) {
       if (trailHandle) trailHandle.destroy();
       if (ripplesHandle) ripplesHandle.destroy();
       if (es) { try { es.close(); } catch {} }
+      if (chordWheelEl) { try { chordWheelEl.remove(); } catch {} chordWheelEl = null; }
       window.removeEventListener("pagehide", onPageHide);
       gsap.killTweensOf("*");
     },

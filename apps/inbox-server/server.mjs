@@ -210,6 +210,7 @@ let currentWord = "en"; // key in WORDS dict on the front-end
 let currentVibe = "default"; // background palette/mood
 let currentTempo = 60; // shared BPM
 let currentLamp = false; // light/dark for everyone
+let currentChord = "Am"; // shared chord — "conductor" can jump the cycle
 
 // Step sequencer grid: 5 letters × 16 steps, all booleans. Persists in memory
 // across visitors so what one person makes is what the next person walks into.
@@ -224,6 +225,7 @@ const PALETTE = new Set([
 const MODES = new Set(["solid", "outline", "dotted", "stripes"]);
 const WORDS = new Set(["en", "es", "fr", "de", "it", "ja", "zh", "ar", "ru", "ko", "el", "he"]);
 const VIBES = new Set(["default", "dawn", "electric", "mono", "forest", "sunset"]);
+const CHORD_NAMES = new Set(["Am", "F", "C", "G"]);
 
 function ipFromReq(req) {
   const xfwd = (req.headers["x-forwarded-for"] || "").toString().split(",")[0].trim();
@@ -282,6 +284,7 @@ function handleEvents(req, res) {
   res.write(`data: ${JSON.stringify({ type: "vibe", vibe: currentVibe })}\n\n`);
   res.write(`data: ${JSON.stringify({ type: "tempo", tempo: currentTempo })}\n\n`);
   res.write(`data: ${JSON.stringify({ type: "lamp", on: currentLamp })}\n\n`);
+  res.write(`data: ${JSON.stringify({ type: "chord", chord: currentChord })}\n\n`);
   res.write(`data: ${JSON.stringify({ type: "grid", grid })}\n\n`);
   res.write(`data: ${JSON.stringify({ type: "presence", count: sseClients.size + 1 })}\n\n`);
   sseClients.add(res);
@@ -319,7 +322,7 @@ async function handleEventPublish(req, res) {
   let body;
   try { body = JSON.parse(raw); } catch { return j(res, 400, { error: "bad json" }); }
   // Whitelist allowed event types and clamp coords.
-  const allowed = new Set(["click", "hover", "wave", "tab", "color", "mode", "word", "vibe", "tempo", "confetti", "lamp", "step", "clear", "ptr", "kick"]);
+  const allowed = new Set(["click", "hover", "wave", "tab", "color", "mode", "word", "vibe", "tempo", "confetti", "lamp", "step", "clear", "ptr", "kick", "chord"]);
   const type = allowed.has(body.type) ? body.type : null;
   if (!type) return j(res, 400, { error: "bad type" });
   // ptr (cursor presence) gets its own looser bucket; everything else uses
@@ -386,6 +389,16 @@ async function handleEventPublish(req, res) {
   if (type === "lamp") {
     currentLamp = !!body.on;
     broadcast({ type: "lamp", on: currentLamp, from, ts: Date.now() });
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    return j(res, 202, { ok: true });
+  }
+
+  if (type === "chord") {
+    // Strict whitelist — only the four progression chords.
+    const chord = typeof body.chord === "string" ? body.chord : "";
+    if (!CHORD_NAMES.has(chord)) return j(res, 400, { error: "bad chord" });
+    currentChord = chord;
+    broadcast({ type: "chord", chord: currentChord, from, ts: Date.now() });
     res.setHeader("Access-Control-Allow-Origin", "*");
     return j(res, 202, { ok: true });
   }
