@@ -2581,6 +2581,140 @@ export function initMotion(gsap) {
     }
   });
 
+  // ── THE MAYOR SPEAKS ──────────────────────────────────────────────────
+  // Every ~90s (random 60-120s offset), a literary line typewriter-fades in
+  // at the top of the page, narrating the room. Bank rotates with visit
+  // duration: early / mid / late.
+  const visitStartedAt = Date.now();
+  const NARRATOR_LINES = {
+    early: [
+      "the room is breathing.",
+      "someone's note still hangs here.",
+      "look — a star moved.",
+      "the field is yellow today.",
+      "the mayor is in.",
+      "you've arrived in the middle of something.",
+    ],
+    mid: [
+      "patterns are forming.",
+      "this groove isn't yours alone.",
+      "the wall has been redecorated.",
+      "someone here doesn't know what they're doing — and they're right.",
+      "the room remembers.",
+      "tempo is rising.",
+    ],
+    late: [
+      "you've been here a while.",
+      "the page has noticed.",
+      "you are part of the music now.",
+      "what you make here outlives you (a little).",
+      "go on.",
+    ],
+  };
+  const narratorEl = document.createElement("div");
+  narratorEl.setAttribute("aria-live", "polite");
+  narratorEl.setAttribute("aria-atomic", "true");
+  Object.assign(narratorEl.style, {
+    position: "fixed",
+    top: "24px",
+    left: "50%",
+    transform: "translateX(-50%)",
+    fontFamily: "'JetBrains Mono', 'SF Mono', ui-monospace, Menlo, monospace",
+    fontSize: "11px",
+    letterSpacing: "0.2em",
+    textTransform: "uppercase",
+    color: "rgba(255,255,255,0.65)",
+    pointerEvents: "none",
+    userSelect: "none",
+    zIndex: "60",
+    whiteSpace: "nowrap",
+    opacity: "0",
+    textAlign: "center",
+    maxWidth: "90vw",
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+  });
+  document.body.appendChild(narratorEl);
+
+  let narratorTimeout = null;
+  let narratorTypeTimer = null;
+  let narratorHoldTimer = null;
+  let narratorFadeTween = null;
+
+  function pickNarratorLine() {
+    const minutes = (Date.now() - visitStartedAt) / 60000;
+    const bank = minutes < 2
+      ? NARRATOR_LINES.early
+      : minutes < 10
+      ? NARRATOR_LINES.mid
+      : NARRATOR_LINES.late;
+    return bank[Math.floor(Math.random() * bank.length)];
+  }
+
+  function speakNarratorLine() {
+    if (document.hidden) return;
+    const onboardFlag = (() => {
+      try { return localStorage.getItem("mayor:onboard:done"); } catch { return null; }
+    })();
+    // Skip during onboarding: only fire if flag === "true", OR no flag at all
+    // and user has been on page > 60s.
+    if (onboardFlag !== "true") {
+      if (onboardFlag !== null) return; // explicitly not done — skip
+      if (Date.now() - visitStartedAt < 60000) return; // too early
+    }
+    const line = pickNarratorLine();
+    if (!line) return;
+    // Cancel any in-flight typewriter / fade.
+    if (narratorTypeTimer) { clearTimeout(narratorTypeTimer); narratorTypeTimer = null; }
+    if (narratorHoldTimer) { clearTimeout(narratorHoldTimer); narratorHoldTimer = null; }
+    if (narratorFadeTween) { narratorFadeTween.kill(); narratorFadeTween = null; }
+    narratorEl.textContent = "";
+    gsap.set(narratorEl, { opacity: 1 });
+    let i = 0;
+    const typeNext = () => {
+      narratorEl.textContent = line.slice(0, i + 1);
+      i++;
+      if (i < line.length) {
+        narratorTypeTimer = setTimeout(typeNext, 30);
+      } else {
+        narratorTypeTimer = null;
+        // Hold 5s then fade over 1.5s. Total visible ~8s including type-in.
+        narratorHoldTimer = setTimeout(() => {
+          narratorHoldTimer = null;
+          narratorFadeTween = gsap.to(narratorEl, {
+            opacity: 0,
+            duration: 1.5,
+            ease: "power2.in",
+            onComplete: () => {
+              narratorEl.textContent = "";
+              narratorFadeTween = null;
+            },
+          });
+        }, 5000);
+      }
+    };
+    typeNext();
+  }
+
+  function scheduleNextNarrator() {
+    // 60-120s random offset. ~90s mean.
+    const delay = 60000 + Math.random() * 60000;
+    narratorTimeout = setTimeout(() => {
+      narratorTimeout = null;
+      if (!document.hidden) speakNarratorLine();
+      scheduleNextNarrator();
+    }, delay);
+  }
+  if (!reduced) scheduleNextNarrator();
+
+  function destroyNarrator() {
+    if (narratorTimeout) { clearTimeout(narratorTimeout); narratorTimeout = null; }
+    if (narratorTypeTimer) { clearTimeout(narratorTypeTimer); narratorTypeTimer = null; }
+    if (narratorHoldTimer) { clearTimeout(narratorHoldTimer); narratorHoldTimer = null; }
+    if (narratorFadeTween) { narratorFadeTween.kill(); narratorFadeTween = null; }
+    try { narratorEl.remove(); } catch {}
+  }
+
   // ── CLEANUP ──
   const onPageHide = () => {
     clearInterval(pollInterval);
@@ -2592,6 +2726,7 @@ export function initMotion(gsap) {
     if (nightRaf) cancelAnimationFrame(nightRaf);
     if (ghostState.recordTimeout) clearTimeout(ghostState.recordTimeout);
     cancelGhostPlayback();
+    destroyNarrator();
     if (fieldHandle) fieldHandle.destroy();
     if (starsHandle) starsHandle.destroy();
     if (auroraHandle) auroraHandle.destroy();
@@ -2613,6 +2748,7 @@ export function initMotion(gsap) {
       if (nightRaf) cancelAnimationFrame(nightRaf);
       if (ghostState.recordTimeout) clearTimeout(ghostState.recordTimeout);
       cancelGhostPlayback();
+      destroyNarrator();
       if (fieldHandle) fieldHandle.destroy();
       if (starsHandle) starsHandle.destroy();
       if (auroraHandle) auroraHandle.destroy();
