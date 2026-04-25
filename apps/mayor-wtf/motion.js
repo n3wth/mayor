@@ -2581,6 +2581,94 @@ export function initMotion(gsap) {
     }
   });
 
+  // ── TIME TRAVEL ──────────────────────────────────────────────────────
+  // ←/→ arrow keys rewind/fast-forward the room's grid through saved
+  // snapshots (server keeps the last 10, taken every 60s). When you
+  // travel, every visitor jumps with you — the server broadcasts a fresh
+  // 'grid' snapshot which the existing SSE handler applies via applyGrid.
+  // A small floating chip flashes the offset so you feel the motion.
+  // Local optimism: we step this on each keypress and show it in the chip.
+  // The server is the source of truth for the actual grid; we re-sync this
+  // value from the server's reply so the chip matches what the room sees.
+  let travelOffset = 0; // 0 = now, -1 = 1 minute ago, etc.
+  let travelChipEl = null;
+  let travelChipTimer = 0;
+  function showTravelChip(text) {
+    if (!travelChipEl) {
+      travelChipEl = document.createElement("div");
+      travelChipEl.setAttribute("aria-live", "polite");
+      travelChipEl.style.cssText = [
+        "position:fixed",
+        "left:50%",
+        "bottom:48px",
+        "transform:translateX(-50%) translateY(8px)",
+        "padding:8px 14px",
+        "border-radius:999px",
+        "background:rgba(0,0,0,0.55)",
+        "color:#f0d72a",
+        "font: 500 13px/1 ui-sans-serif, system-ui, sans-serif",
+        "letter-spacing:0.02em",
+        "pointer-events:none",
+        "opacity:0",
+        "transition: opacity 180ms ease, transform 180ms ease",
+        "z-index:9999",
+      ].join(";");
+      document.body.appendChild(travelChipEl);
+    }
+    travelChipEl.textContent = text;
+    requestAnimationFrame(() => {
+      if (!travelChipEl) return;
+      travelChipEl.style.opacity = "1";
+      travelChipEl.style.transform = "translateX(-50%) translateY(0)";
+    });
+    if (travelChipTimer) clearTimeout(travelChipTimer);
+    travelChipTimer = setTimeout(() => {
+      if (!travelChipEl) return;
+      travelChipEl.style.opacity = "0";
+      travelChipEl.style.transform = "translateX(-50%) translateY(8px)";
+    }, 1400);
+  }
+  function travelLabel(offset) {
+    if (offset === 0) return "→ now";
+    const mins = Math.abs(offset);
+    const word = mins === 1 ? "minute" : "minutes";
+    return offset < 0 ? `← ${mins} ${word} ago` : `→ ${mins} ${word} ago`;
+  }
+  window.addEventListener("keydown", (e) => {
+    if (e.defaultPrevented) return;
+    if (e.repeat) return;
+    if (e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return;
+    const t = e.target;
+    if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
+    if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+    const back = e.key === "ArrowLeft";
+    const next = back ? travelOffset - 1 : travelOffset + 1;
+    // Clamp to [-10, 0] — server only keeps 10 snapshots.
+    const clamped = Math.max(-10, Math.min(0, next));
+    if (clamped === travelOffset) {
+      // At the edge — flash the boundary so the user feels the wall.
+      showTravelChip(travelLabel(clamped));
+      return;
+    }
+    travelOffset = clamped;
+    const type = back ? "rewind" : "forward";
+    showTravelChip(travelLabel(travelOffset));
+    fetch(`${SYNC_BASE}/event`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ type, offset: back ? -1 : 1, from: SELF_ID }),
+      keepalive: true,
+    }).then((r) => r.ok ? r.json() : null).then((data) => {
+      if (data && Number.isFinite(data.offset)) {
+        // Sync to server truth — peers may have moved the cursor too.
+        if (data.offset !== travelOffset) {
+          travelOffset = data.offset;
+          showTravelChip(travelLabel(travelOffset));
+        }
+      }
+    }).catch(() => {});
+  });
+
   // ── CLEANUP ──
   const onPageHide = () => {
     clearInterval(pollInterval);
@@ -2599,6 +2687,8 @@ export function initMotion(gsap) {
     if (ripplesHandle) ripplesHandle.destroy();
     if (es) { try { es.close(); } catch {} }
     if (chordWheelEl) { try { chordWheelEl.remove(); } catch {} chordWheelEl = null; }
+    if (travelChipTimer) { clearTimeout(travelChipTimer); travelChipTimer = 0; }
+    if (travelChipEl) { try { travelChipEl.remove(); } catch {} travelChipEl = null; }
     gsap.killTweensOf("*");
   };
   window.addEventListener("pagehide", onPageHide);
