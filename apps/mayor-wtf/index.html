@@ -97,11 +97,31 @@
     letter-spacing: -0.04em;
     transition: fill 1.2s cubic-bezier(.2,.8,.2,1);
   }
-  .hero .layer.mid .ml[data-letter="M"] { fill: var(--letter-color-M); }
-  .hero .layer.mid .ml[data-letter="A"] { fill: var(--letter-color-A); }
-  .hero .layer.mid .ml[data-letter="Y"] { fill: var(--letter-color-Y); }
-  .hero .layer.mid .ml[data-letter="O"] { fill: var(--letter-color-O); }
-  .hero .layer.mid .ml[data-letter="R"] { fill: var(--letter-color-R); }
+  /* Solid fill (default) per letter */
+  .hero .layer.mid .ml[data-mode="solid"][data-letter="M"]   { fill: var(--letter-color-M); }
+  .hero .layer.mid .ml[data-mode="solid"][data-letter="A"]   { fill: var(--letter-color-A); }
+  .hero .layer.mid .ml[data-mode="solid"][data-letter="Y"]   { fill: var(--letter-color-Y); }
+  .hero .layer.mid .ml[data-mode="solid"][data-letter="O"]   { fill: var(--letter-color-O); }
+  .hero .layer.mid .ml[data-mode="solid"][data-letter="R"]   { fill: var(--letter-color-R); }
+  /* Outline: hollow letter, just the contour */
+  .hero .layer.mid .ml[data-mode="outline"]                  { fill: transparent; stroke-width: 4; paint-order: stroke; }
+  .hero .layer.mid .ml[data-mode="outline"][data-letter="M"] { stroke: var(--letter-color-M); }
+  .hero .layer.mid .ml[data-mode="outline"][data-letter="A"] { stroke: var(--letter-color-A); }
+  .hero .layer.mid .ml[data-mode="outline"][data-letter="Y"] { stroke: var(--letter-color-Y); }
+  .hero .layer.mid .ml[data-mode="outline"][data-letter="O"] { stroke: var(--letter-color-O); }
+  .hero .layer.mid .ml[data-mode="outline"][data-letter="R"] { stroke: var(--letter-color-R); }
+  /* Dotted: pattern-filled */
+  .hero .layer.mid .ml[data-mode="dotted"][data-letter="M"]  { fill: url(#pat-dotted-M); }
+  .hero .layer.mid .ml[data-mode="dotted"][data-letter="A"]  { fill: url(#pat-dotted-A); }
+  .hero .layer.mid .ml[data-mode="dotted"][data-letter="Y"]  { fill: url(#pat-dotted-Y); }
+  .hero .layer.mid .ml[data-mode="dotted"][data-letter="O"]  { fill: url(#pat-dotted-O); }
+  .hero .layer.mid .ml[data-mode="dotted"][data-letter="R"]  { fill: url(#pat-dotted-R); }
+  /* Stripes: diagonal hatch */
+  .hero .layer.mid .ml[data-mode="stripes"][data-letter="M"] { fill: url(#pat-stripes-M); }
+  .hero .layer.mid .ml[data-mode="stripes"][data-letter="A"] { fill: url(#pat-stripes-A); }
+  .hero .layer.mid .ml[data-mode="stripes"][data-letter="Y"] { fill: url(#pat-stripes-Y); }
+  .hero .layer.mid .ml[data-mode="stripes"][data-letter="O"] { fill: url(#pat-stripes-O); }
+  .hero .layer.mid .ml[data-mode="stripes"][data-letter="R"] { fill: url(#pat-stripes-R); }
   .ml { cursor: pointer; pointer-events: auto; }
   .ml.selected { outline: 2px dashed rgba(255,255,255,0.4); outline-offset: 8px; }
 
@@ -230,8 +250,8 @@
   }
   .cta:hover .arrow { transform: translateX(4px); opacity: 1; }
 
-  /* Tiny shared palette — click a color, everyone sees MAYOR change. */
-  .palette {
+  /* Shared toolbox — click a letter, then a color or mode. Everyone sees it. */
+  .toolbox {
     position: absolute;
     left: 50%;
     bottom: clamp(98px, 14vh, 150px);
@@ -239,7 +259,13 @@
     z-index: 13;
     pointer-events: auto;
     display: flex;
-    gap: 10px;
+    gap: 8px;
+    align-items: center;
+  }
+  .pill {
+    display: flex;
+    gap: 8px;
+    align-items: center;
     padding: 8px 12px;
     border-radius: 999px;
     background: rgba(8,8,10,0.45);
@@ -247,16 +273,37 @@
     backdrop-filter: blur(18px) saturate(160%);
     border: 1px solid rgba(255,255,255,0.08);
   }
-  .palette button {
-    width: 18px; height: 18px;
-    border-radius: 50%;
+  .pill button {
+    background: transparent;
     border: 1px solid rgba(255,255,255,0.12);
     cursor: pointer;
     padding: 0;
-    transition: transform .25s cubic-bezier(.2,.8,.2,1), box-shadow .25s ease;
+    transition: transform .25s cubic-bezier(.2,.8,.2,1), box-shadow .25s ease, border-color .25s ease;
   }
-  .palette button:hover { transform: scale(1.2); }
-  .palette button.active { box-shadow: 0 0 0 2px rgba(255,255,255,0.95); }
+  .pill button:hover { transform: scale(1.12); }
+  .pill button.active { box-shadow: 0 0 0 2px rgba(255,255,255,0.95); }
+  /* Color swatches */
+  .palette button {
+    width: 18px; height: 18px;
+    border-radius: 50%;
+  }
+  /* Mode swatches — square, with iconographic preview */
+  .modes button {
+    width: 22px; height: 22px;
+    border-radius: 4px;
+    background: rgba(255,255,255,0.04);
+    color: rgba(255,255,255,0.85);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .modes button svg { width: 14px; height: 14px; }
+  @media (max-width: 700px) {
+    .toolbox { gap: 6px; }
+    .pill { padding: 6px 10px; gap: 6px; }
+    .palette button { width: 16px; height: 16px; }
+    .modes button { width: 20px; height: 20px; }
+  }
 
   /* Top corners */
   .top {
@@ -337,6 +384,38 @@
     <div class="layer mid" data-layer="mid">
       <svg viewBox="0 0 1500 480" preserveAspectRatio="xMidYMid meet">
         <defs>
+          <!-- Per-letter pattern fills — one of each kind per letter so
+               the pattern color can track that letter's color independently. -->
+          <pattern id="pat-dotted-M" patternUnits="userSpaceOnUse" width="22" height="22">
+            <circle cx="11" cy="11" r="3.2" fill="var(--letter-color-M)"/>
+          </pattern>
+          <pattern id="pat-dotted-A" patternUnits="userSpaceOnUse" width="22" height="22">
+            <circle cx="11" cy="11" r="3.2" fill="var(--letter-color-A)"/>
+          </pattern>
+          <pattern id="pat-dotted-Y" patternUnits="userSpaceOnUse" width="22" height="22">
+            <circle cx="11" cy="11" r="3.2" fill="var(--letter-color-Y)"/>
+          </pattern>
+          <pattern id="pat-dotted-O" patternUnits="userSpaceOnUse" width="22" height="22">
+            <circle cx="11" cy="11" r="3.2" fill="var(--letter-color-O)"/>
+          </pattern>
+          <pattern id="pat-dotted-R" patternUnits="userSpaceOnUse" width="22" height="22">
+            <circle cx="11" cy="11" r="3.2" fill="var(--letter-color-R)"/>
+          </pattern>
+          <pattern id="pat-stripes-M" patternUnits="userSpaceOnUse" width="14" height="14" patternTransform="rotate(-30)">
+            <rect x="0" y="0" width="6" height="14" fill="var(--letter-color-M)"/>
+          </pattern>
+          <pattern id="pat-stripes-A" patternUnits="userSpaceOnUse" width="14" height="14" patternTransform="rotate(-30)">
+            <rect x="0" y="0" width="6" height="14" fill="var(--letter-color-A)"/>
+          </pattern>
+          <pattern id="pat-stripes-Y" patternUnits="userSpaceOnUse" width="14" height="14" patternTransform="rotate(-30)">
+            <rect x="0" y="0" width="6" height="14" fill="var(--letter-color-Y)"/>
+          </pattern>
+          <pattern id="pat-stripes-O" patternUnits="userSpaceOnUse" width="14" height="14" patternTransform="rotate(-30)">
+            <rect x="0" y="0" width="6" height="14" fill="var(--letter-color-O)"/>
+          </pattern>
+          <pattern id="pat-stripes-R" patternUnits="userSpaceOnUse" width="14" height="14" patternTransform="rotate(-30)">
+            <rect x="0" y="0" width="6" height="14" fill="var(--letter-color-R)"/>
+          </pattern>
           <!-- Diagonal shine gradient that animates across the letters -->
           <linearGradient id="shine-grad" x1="0%" y1="0%" x2="100%" y2="0%" gradientUnits="userSpaceOnUse">
             <stop offset="0%"  stop-color="rgba(255,255,255,0)"/>
@@ -355,11 +434,11 @@
         </defs>
         <g id="mayor-letters" font-family="Display, Arial Narrow Bold, sans-serif"
                               font-weight="900" font-size="440" text-anchor="middle">
-          <text class="ml" data-letter="M" x="180"  y="380">M</text>
-          <text class="ml" data-letter="A" x="465"  y="380">A</text>
-          <text class="ml" data-letter="Y" x="750"  y="380">Y</text>
-          <text class="ml" data-letter="O" x="1035" y="380">O</text>
-          <text class="ml" data-letter="R" x="1320" y="380">R</text>
+          <text class="ml" data-letter="M" data-mode="solid" x="180"  y="380">M</text>
+          <text class="ml" data-letter="A" data-mode="solid" x="465"  y="380">A</text>
+          <text class="ml" data-letter="Y" data-mode="solid" x="750"  y="380">Y</text>
+          <text class="ml" data-letter="O" data-mode="solid" x="1035" y="380">O</text>
+          <text class="ml" data-letter="R" data-mode="solid" x="1320" y="380">R</text>
         </g>
       </svg>
     </div>
@@ -395,16 +474,46 @@
     <a class="chip" href="https://n3wth.com" rel="noopener">n3wth.com</a>
   </div>
 
-  <!-- Live shared palette — click a letter, then a color. Everyone sees it. -->
-  <div class="palette" data-palette aria-label="Recolor a letter">
-    <button data-color="#f0d72a" style="background:#f0d72a"></button>
-    <button data-color="#ffffff" style="background:#ffffff"></button>
-    <button data-color="#ff8a3d" style="background:#ff8a3d"></button>
-    <button data-color="#7dd3fc" style="background:#7dd3fc"></button>
-    <button data-color="#a78bfa" style="background:#a78bfa"></button>
-    <button data-color="#34d399" style="background:#34d399"></button>
-    <button data-color="#f472b6" style="background:#f472b6"></button>
-    <button data-color="#fb7185" style="background:#fb7185"></button>
+  <!-- Live shared toolbox — click a letter, then a color or mode. -->
+  <div class="toolbox" aria-label="Letter style">
+    <div class="pill palette" data-palette>
+      <button data-color="#f0d72a" style="background:#f0d72a"></button>
+      <button data-color="#ffffff" style="background:#ffffff"></button>
+      <button data-color="#ff8a3d" style="background:#ff8a3d"></button>
+      <button data-color="#7dd3fc" style="background:#7dd3fc"></button>
+      <button data-color="#a78bfa" style="background:#a78bfa"></button>
+      <button data-color="#34d399" style="background:#34d399"></button>
+      <button data-color="#f472b6" style="background:#f472b6"></button>
+      <button data-color="#fb7185" style="background:#fb7185"></button>
+    </div>
+    <div class="pill modes" data-modes>
+      <button data-mode="solid" title="Solid">
+        <svg viewBox="0 0 14 14"><rect x="1" y="1" width="12" height="12" rx="2" fill="currentColor"/></svg>
+      </button>
+      <button data-mode="outline" title="Outline">
+        <svg viewBox="0 0 14 14"><rect x="1.5" y="1.5" width="11" height="11" rx="2" fill="none" stroke="currentColor" stroke-width="1.6"/></svg>
+      </button>
+      <button data-mode="dotted" title="Dotted">
+        <svg viewBox="0 0 14 14">
+          <circle cx="3" cy="3" r="1.4" fill="currentColor"/>
+          <circle cx="7" cy="3" r="1.4" fill="currentColor"/>
+          <circle cx="11" cy="3" r="1.4" fill="currentColor"/>
+          <circle cx="3" cy="7" r="1.4" fill="currentColor"/>
+          <circle cx="7" cy="7" r="1.4" fill="currentColor"/>
+          <circle cx="11" cy="7" r="1.4" fill="currentColor"/>
+          <circle cx="3" cy="11" r="1.4" fill="currentColor"/>
+          <circle cx="7" cy="11" r="1.4" fill="currentColor"/>
+          <circle cx="11" cy="11" r="1.4" fill="currentColor"/>
+        </svg>
+      </button>
+      <button data-mode="stripes" title="Stripes">
+        <svg viewBox="0 0 14 14">
+          <line x1="0"  y1="13" x2="13" y2="0"  stroke="currentColor" stroke-width="1.6"/>
+          <line x1="-4" y1="9"  x2="9"  y2="-4" stroke="currentColor" stroke-width="1.6"/>
+          <line x1="4"  y1="17" x2="17" y2="4"  stroke="currentColor" stroke-width="1.6"/>
+        </svg>
+      </button>
+    </div>
   </div>
 
   <!-- CTA -->

@@ -599,6 +599,48 @@ export function initMotion(gsap) {
     });
   });
 
+  // Modes — solid / outline / dotted / stripes. Same semantics as palette:
+  // selected letter (or all) + click a mode → broadcasts to peers.
+  const modeButtons = Array.from(document.querySelectorAll("[data-modes] button"));
+  function applyLetterMode(letter, mode, animate = true) {
+    const target = letters.find((l) => l.dataset.letter === letter);
+    if (!target) return;
+    if (animate && target.dataset.mode !== mode) {
+      // Subtle fade-through so the mode swap doesn't snap.
+      gsap.fromTo(target,
+        { opacity: 1 },
+        {
+          opacity: 0.35,
+          duration: 0.28,
+          ease: "sine.in",
+          onComplete: () => {
+            target.dataset.mode = mode;
+            gsap.to(target, { opacity: 1, duration: 0.5, ease: "sine.out" });
+          },
+        }
+      );
+    } else {
+      target.dataset.mode = mode;
+    }
+  }
+  modeButtons.forEach((b) => {
+    b.addEventListener("click", () => {
+      const mode = b.dataset.mode;
+      modeButtons.forEach((x) => x.classList.toggle("active", x === b));
+      const targets = selectedLetter ? [selectedLetter] : ["M", "A", "Y", "O", "R"];
+      targets.forEach((letter) => {
+        applyLetterMode(letter, mode);
+        fetch(`${SYNC_BASE}/event`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ type: "mode", letter, mode, from: SELF_ID }),
+          keepalive: true,
+        }).catch(() => {});
+      });
+      setTimeout(() => modeButtons.forEach((x) => x.classList.remove("active")), 1400);
+    });
+  });
+
   // Open SSE connection for incoming events.
   let es = null;
   function connectSync() {
@@ -613,9 +655,14 @@ export function initMotion(gsap) {
             return;
           }
           if (ev.type === "colors") {
-            // Snapshot on connect — apply current colors instantly.
             for (const [letter, color] of Object.entries(ev.colors || {})) {
               applyLetterColor(letter, color, false);
+            }
+            return;
+          }
+          if (ev.type === "modes") {
+            for (const [letter, mode] of Object.entries(ev.modes || {})) {
+              applyLetterMode(letter, mode, false);
             }
             return;
           }
@@ -623,13 +670,18 @@ export function initMotion(gsap) {
           if (ev.from === SELF_ID) return;
           if (ev.type === "color") {
             applyLetterColor(ev.letter, ev.color);
-            // Letter does a small acknowledgement hop
             const target = letters.find((l) => l.dataset.letter === ev.letter);
             if (target) {
-              gsap.fromTo(target,
-                { y: 0 },
-                { y: -8, duration: 0.3, ease: "back.out(2)" }
-              );
+              gsap.fromTo(target, { y: 0 }, { y: -8, duration: 0.3, ease: "back.out(2)" });
+              gsap.to(target, { y: 0, duration: 0.9, ease: E.bounce, delay: 0.3 });
+            }
+            return;
+          }
+          if (ev.type === "mode") {
+            applyLetterMode(ev.letter, ev.mode);
+            const target = letters.find((l) => l.dataset.letter === ev.letter);
+            if (target) {
+              gsap.fromTo(target, { y: 0 }, { y: -6, duration: 0.3, ease: "back.out(2)" });
               gsap.to(target, { y: 0, duration: 0.9, ease: E.bounce, delay: 0.3 });
             }
             return;

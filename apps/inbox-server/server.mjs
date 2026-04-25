@@ -202,11 +202,14 @@ const ipBuckets = new Map();  // ip -> { tokens, ts }
 // colors on connect. Only color changes — no size/weight/etc. — so the
 // composition always looks good.
 const DEFAULT_LETTER_COLOR = "#f0d72a";
+const DEFAULT_LETTER_MODE = "solid";
 const letterColors = { M: DEFAULT_LETTER_COLOR, A: DEFAULT_LETTER_COLOR, Y: DEFAULT_LETTER_COLOR, O: DEFAULT_LETTER_COLOR, R: DEFAULT_LETTER_COLOR };
+const letterModes  = { M: DEFAULT_LETTER_MODE,  A: DEFAULT_LETTER_MODE,  Y: DEFAULT_LETTER_MODE,  O: DEFAULT_LETTER_MODE,  R: DEFAULT_LETTER_MODE };
 const PALETTE = new Set([
   "#f0d72a", "#ffffff", "#ff8a3d", "#7dd3fc", "#a78bfa",
   "#34d399", "#f472b6", "#fb7185",
 ]);
+const MODES = new Set(["solid", "outline", "dotted", "stripes"]);
 
 function ipFromReq(req) {
   const xfwd = (req.headers["x-forwarded-for"] || "").toString().split(",")[0].trim();
@@ -243,8 +246,9 @@ function handleEvents(req, res) {
     "X-Accel-Buffering": "no",
   });
   res.write(`: connected ${new Date().toISOString()}\n\n`);
-  // Tell the new client the current letter colors + how many peers are present.
+  // Tell the new client the current letter colors + modes + how many peers are present.
   res.write(`data: ${JSON.stringify({ type: "colors", colors: { ...letterColors } })}\n\n`);
+  res.write(`data: ${JSON.stringify({ type: "modes", modes: { ...letterModes } })}\n\n`);
   res.write(`data: ${JSON.stringify({ type: "presence", count: sseClients.size + 1 })}\n\n`);
   sseClients.add(res);
   // Notify everyone else of the new presence count.
@@ -282,19 +286,28 @@ async function handleEventPublish(req, res) {
   let body;
   try { body = JSON.parse(raw); } catch { return j(res, 400, { error: "bad json" }); }
   // Whitelist allowed event types and clamp coords.
-  const allowed = new Set(["click", "hover", "wave", "tab", "color"]);
+  const allowed = new Set(["click", "hover", "wave", "tab", "color", "mode"]);
   const type = allowed.has(body.type) ? body.type : null;
   if (!type) return j(res, 400, { error: "bad type" });
   // 'from' is a stable per-tab nonce so peers can ignore their own echoes.
   const from = typeof body.from === "string" ? body.from.slice(0, 24) : "";
 
   if (type === "color") {
-    // Per-letter recolor. letter ∈ {M,A,Y,O,R}, color ∈ PALETTE.
     const letter = typeof body.letter === "string" ? body.letter.toUpperCase() : "";
     if (!letterColors.hasOwnProperty(letter)) return j(res, 400, { error: "bad letter" });
     if (!PALETTE.has(body.color)) return j(res, 400, { error: "bad color" });
     letterColors[letter] = body.color;
     broadcast({ type: "color", letter, color: body.color, from, ts: Date.now() });
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    return j(res, 202, { ok: true });
+  }
+
+  if (type === "mode") {
+    const letter = typeof body.letter === "string" ? body.letter.toUpperCase() : "";
+    if (!letterModes.hasOwnProperty(letter)) return j(res, 400, { error: "bad letter" });
+    if (!MODES.has(body.mode)) return j(res, 400, { error: "bad mode" });
+    letterModes[letter] = body.mode;
+    broadcast({ type: "mode", letter, mode: body.mode, from, ts: Date.now() });
     res.setHeader("Access-Control-Allow-Origin", "*");
     return j(res, 202, { ok: true });
   }
