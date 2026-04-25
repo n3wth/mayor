@@ -592,6 +592,23 @@ export function initMotion(gsap) {
   pollStats();
   const pollInterval = setInterval(pollStats, 5000);
 
+  // ── WIND CHIMES: the room sings to itself ──
+  // When sound is on, a soft pentatonic note plays at random intervals
+  // (every 6–18s) — even with no interaction. Ambient music; no nagging.
+  function chime() {
+    if (soundOn && !document.hidden) {
+      const note = PENT[Math.floor(Math.random() * PENT.length)];
+      pluck(note, 0, 0.25 + Math.random() * 0.15);
+      if (ripplesHandle) {
+        const x = Math.random() * window.innerWidth;
+        const y = Math.random() * window.innerHeight;
+        ripplesHandle.add(x, y, false);
+      }
+    }
+    setTimeout(chime, 6000 + Math.random() * 12000);
+  }
+  setTimeout(chime, 10000);
+
   // ── CLEANUP ──
   const onPageHide = () => {
     clearInterval(pollInterval);
