@@ -74,6 +74,8 @@ export function initMotion(gsap) {
   const sparksLayer = document.querySelector("[data-sparks]");
   const fieldSvg = document.querySelector(".field svg");
   const objectsG = document.getElementById("objects");
+  const linesG = document.getElementById("lines");
+  const ripplesG = document.getElementById("ripples");
 
   // ── ENTRANCE ───────────────────────────────────────────
   if (!reduced) {
@@ -209,6 +211,15 @@ export function initMotion(gsap) {
     return c;
   }
 
+  function nearestLetterPos(x, y) {
+    let best = null, bestD = Infinity;
+    for (const [, pos] of letterPos) {
+      const d = Math.hypot(pos.cx - x, pos.cy - y);
+      if (d < bestD) { bestD = d; best = pos; }
+    }
+    return best;
+  }
+
   function spawnSession(key, seed) {
     if (live.has(key)) return;
     const { x, y } = pickSessionPosition(seed);
@@ -217,6 +228,36 @@ export function initMotion(gsap) {
     blob.setAttribute("cy", y);
     objectsG.appendChild(blob);
     const targetR = Number(blob.dataset.r);
+
+    // Constellation line from this session to its nearest MAYOR letter.
+    // Drawn at length 0, then animated to full length so it "draws on".
+    const letterAnchor = nearestLetterPos(x, y);
+    let line = null;
+    if (letterAnchor && linesG) {
+      line = document.createElementNS(SVG_NS, "line");
+      line.setAttribute("x1", x);
+      line.setAttribute("y1", y);
+      line.setAttribute("x2", x);
+      line.setAttribute("y2", y);
+      line.setAttribute("stroke", "black");
+      line.setAttribute("stroke-width", "1");
+      line.setAttribute("opacity", "0.0");
+      linesG.appendChild(line);
+      if (!reduced) {
+        gsap.to(line, {
+          attr: { x2: letterAnchor.cx, y2: letterAnchor.cy },
+          opacity: 0.45,
+          duration: 1.6,
+          ease: "power3.out",
+          delay: 0.3,
+        });
+      } else {
+        line.setAttribute("x2", letterAnchor.cx);
+        line.setAttribute("y2", letterAnchor.cy);
+        line.setAttribute("opacity", "0.45");
+      }
+    }
+
     if (reduced) {
       blob.setAttribute("r", targetR);
     } else {
@@ -225,13 +266,20 @@ export function initMotion(gsap) {
         { attr: { r: targetR }, duration: 1.2, ease: E.bounce, overwrite: "auto" }
       );
     }
-    live.set(key, { el: blob, kind: "session", x, y });
-
+    live.set(key, { el: blob, kind: "session", x, y, line });
   }
 
   function despawnSession(key) {
     const obj = live.get(key);
     if (!obj) return;
+    if (obj.line) {
+      gsap.to(obj.line, {
+        opacity: 0,
+        duration: 0.6,
+        ease: "power2.in",
+        onComplete: () => obj.line.remove(),
+      });
+    }
     if (reduced) {
       obj.el.remove();
       live.delete(key);
@@ -282,30 +330,103 @@ export function initMotion(gsap) {
       if (obj.kind !== "citizen") continue;
       const { x, y } = citizenSlotPos(i, total);
       obj.idx = i;
-      obj.x = x;
-      obj.y = y;
-      gsap.to(obj.el, {
-        attr: { cx: x, cy: y },
-        duration: 1.6,
-        ease: E.inOut,
-        overwrite: "auto",
-      });
+      obj.slotX = x;
+      obj.slotY = y;
       i++;
     }
+  }
+
+  // Citizen orbit drift: each citizen oscillates around its slot position
+  // with a unique phase. Slow when idle, faster when sessions are active.
+  // One global RAF loop drives all citizens — cheap.
+  let citizenDriftSpeed = 1.0;
+  function citizenDriftLoop() {
+    const now = performance.now() / 1000;
+    for (const obj of live.values()) {
+      if (obj.kind !== "citizen") continue;
+      const slotX = obj.slotX ?? obj.x;
+      const slotY = obj.slotY ?? obj.y;
+      const phase = obj.idx * 1.7;
+      const t = now * 0.12 * citizenDriftSpeed + phase;
+      const dx = Math.cos(t) * 14 + Math.cos(t * 0.7) * 6;
+      const dy = Math.sin(t * 0.8) * 10 + Math.sin(t * 1.3) * 4;
+      const newX = slotX + dx;
+      const newY = slotY + dy;
+      obj.x = newX;
+      obj.y = newY;
+      obj.el.setAttribute("cx", newX);
+      obj.el.setAttribute("cy", newY);
+    }
+    citizenDriftRaf = requestAnimationFrame(citizenDriftLoop);
+  }
+  let citizenDriftRaf = !reduced ? requestAnimationFrame(citizenDriftLoop) : 0;
+
+  // ── RIPPLE: expanding ring cutout that washes outward from a point. ──
+  // As it passes each object, that object briefly inflates. Like dropping
+  // a stone into the yellow plane — the wave touches everything.
+  function ripple(svgX, svgY, opts = {}) {
+    if (reduced) return;
+    const maxR = opts.maxR || 1400;
+    const dur = opts.duration || 1.8;
+
+    // Visual ring (cutout)
+    const ring = document.createElementNS(SVG_NS, "circle");
+    ring.setAttribute("cx", svgX);
+    ring.setAttribute("cy", svgY);
+    ring.setAttribute("r", "0");
+    ring.setAttribute("fill", "none");
+    ring.setAttribute("stroke", "black");
+    ring.setAttribute("stroke-width", "3");
+    ripplesG.appendChild(ring);
+    gsap.to(ring, {
+      attr: { r: maxR, "stroke-width": 0.2 },
+      duration: dur,
+      ease: "power2.out",
+      onComplete: () => ring.remove(),
+    });
+
+    // Wave bumping objects in order of distance from origin.
+    const sorted = [...live.values()]
+      .map((obj) => ({ obj, d: Math.hypot(obj.x - svgX, obj.y - svgY) }))
+      .sort((a, b) => a.d - b.d);
+    sorted.forEach(({ obj, d }) => {
+      const arrival = (d / maxR) * dur;
+      const r = Number(obj.el.getAttribute("r")) || 10;
+      gsap.fromTo(obj.el,
+        { attr: { r } },
+        {
+          attr: { r: r * 1.5 },
+          duration: 0.18,
+          ease: "power2.out",
+          delay: arrival,
+          overwrite: "auto",
+        }
+      );
+      gsap.to(obj.el, {
+        attr: { r },
+        duration: 0.9,
+        ease: E.bounce,
+        delay: arrival + 0.18,
+        overwrite: "auto",
+      });
+    });
   }
 
   // ── CLICK SHOCKWAVE ──
   function shockwave(e) {
     if (reduced) return;
-    for (const obj of live.values()) {
-      const r = Number(obj.el.getAttribute("r")) || 10;
-      gsap.fromTo(obj.el,
-        { attr: { r: r * 1.6 } },
-        { attr: { r }, duration: 1.2, ease: E.bounce, overwrite: "auto" }
-      );
+    // Convert click to viewBox coords for the ripple origin
+    let originX = 800, originY = 500;
+    if (e && fieldSvg) {
+      const rect = fieldSvg.getBoundingClientRect();
+      const scale = Math.max(rect.width / 1600, rect.height / 1000);
+      const offX = rect.left + (rect.width - 1600 * scale) / 2;
+      const offY = rect.top + (rect.height - 1000 * scale) / 2;
+      originX = (e.clientX - offX) / scale;
+      originY = (e.clientY - offY) / scale;
     }
-    if (e && sparksLayer) emitSparks(gsap, sparksLayer, e.clientX, e.clientY, 12, { radius: 200 });
-    // 1-in-3 chance of letter delight on click — keeps it surprising
+    ripple(originX, originY);
+    if (e && sparksLayer) emitSparks(gsap, sparksLayer, e.clientX, e.clientY, 10, { radius: 180 });
     if (Math.random() < 0.34) delightLetter({ count: 12 });
   }
   if (!reduced) {
@@ -372,14 +493,18 @@ export function initMotion(gsap) {
     if (lastStats) {
       const newSession = sessions > (lastStats.sessions_today || 0);
       const newCitizen = citizens > (lastStats.citizens || 0);
-      if (newSession && sparksLayer) {
+      if (newSession) {
         const idx = sessions - 1;
         const obj = live.get(`session-${dayKey}-${idx}`);
         if (obj) {
-          const { x, y } = svgToScreen(obj.x, obj.y);
-          emitSparks(gsap, sparksLayer, x, y, 14, { radius: 180 });
+          // Ripple from the new session's actual position — wave washes through
+          // the constellation as it expands, bumping every other object.
+          ripple(obj.x, obj.y, { duration: 2.2, maxR: 1600 });
+          if (sparksLayer) {
+            const { x, y } = svgToScreen(obj.x, obj.y);
+            emitSparks(gsap, sparksLayer, x, y, 14, { radius: 180 });
+          }
         }
-        // Random letter does a happy hop + colored fountain
         delightLetter({ count: 18 });
       }
       if (newCitizen && sparksLayer) {
@@ -395,6 +520,9 @@ export function initMotion(gsap) {
         });
       }
     }
+
+    // Citizens drift faster when work is happening
+    citizenDriftSpeed = 0.7 + (s.active_sessions || 0) * 0.6 + (s.recent_pulse || 0) * 0.5;
 
     // PAGE-LEVEL MORPH: yellow shifts toward warm under load.
     const pulse = Number(s.recent_pulse || 0);
@@ -443,7 +571,11 @@ export function initMotion(gsap) {
   pollStats();
   const pollInterval = setInterval(pollStats, POLL_MS);
 
-  const onPageHide = () => { clearInterval(pollInterval); gsap.killTweensOf("*"); };
+  const onPageHide = () => {
+    clearInterval(pollInterval);
+    if (citizenDriftRaf) cancelAnimationFrame(citizenDriftRaf);
+    gsap.killTweensOf("*");
+  };
   window.addEventListener("pagehide", onPageHide);
   return {
     destroy: () => {
