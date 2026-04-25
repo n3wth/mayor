@@ -205,11 +205,17 @@ const DEFAULT_LETTER_COLOR = "#f0d72a";
 const DEFAULT_LETTER_MODE = "solid";
 const letterColors = { M: DEFAULT_LETTER_COLOR, A: DEFAULT_LETTER_COLOR, Y: DEFAULT_LETTER_COLOR, O: DEFAULT_LETTER_COLOR, R: DEFAULT_LETTER_COLOR };
 const letterModes  = { M: DEFAULT_LETTER_MODE,  A: DEFAULT_LETTER_MODE,  Y: DEFAULT_LETTER_MODE,  O: DEFAULT_LETTER_MODE,  R: DEFAULT_LETTER_MODE };
+let currentWord = "en"; // key in WORDS dict on the front-end
+let currentVibe = "default"; // background palette/mood
+let currentTempo = 60; // shared BPM
+let currentLamp = false; // light/dark for everyone
 const PALETTE = new Set([
   "#f0d72a", "#ffffff", "#ff8a3d", "#7dd3fc", "#a78bfa",
   "#34d399", "#f472b6", "#fb7185",
 ]);
 const MODES = new Set(["solid", "outline", "dotted", "stripes"]);
+const WORDS = new Set(["en", "es", "fr", "de", "it", "ja", "zh", "ar", "ru", "ko", "el", "he"]);
+const VIBES = new Set(["default", "dawn", "electric", "mono", "forest", "sunset"]);
 
 function ipFromReq(req) {
   const xfwd = (req.headers["x-forwarded-for"] || "").toString().split(",")[0].trim();
@@ -246,9 +252,13 @@ function handleEvents(req, res) {
     "X-Accel-Buffering": "no",
   });
   res.write(`: connected ${new Date().toISOString()}\n\n`);
-  // Tell the new client the current letter colors + modes + how many peers are present.
+  // Tell the new client the current state snapshot.
   res.write(`data: ${JSON.stringify({ type: "colors", colors: { ...letterColors } })}\n\n`);
   res.write(`data: ${JSON.stringify({ type: "modes", modes: { ...letterModes } })}\n\n`);
+  res.write(`data: ${JSON.stringify({ type: "word", word: currentWord })}\n\n`);
+  res.write(`data: ${JSON.stringify({ type: "vibe", vibe: currentVibe })}\n\n`);
+  res.write(`data: ${JSON.stringify({ type: "tempo", tempo: currentTempo })}\n\n`);
+  res.write(`data: ${JSON.stringify({ type: "lamp", on: currentLamp })}\n\n`);
   res.write(`data: ${JSON.stringify({ type: "presence", count: sseClients.size + 1 })}\n\n`);
   sseClients.add(res);
   // Notify everyone else of the new presence count.
@@ -286,7 +296,7 @@ async function handleEventPublish(req, res) {
   let body;
   try { body = JSON.parse(raw); } catch { return j(res, 400, { error: "bad json" }); }
   // Whitelist allowed event types and clamp coords.
-  const allowed = new Set(["click", "hover", "wave", "tab", "color", "mode"]);
+  const allowed = new Set(["click", "hover", "wave", "tab", "color", "mode", "word", "vibe", "tempo", "confetti", "lamp"]);
   const type = allowed.has(body.type) ? body.type : null;
   if (!type) return j(res, 400, { error: "bad type" });
   // 'from' is a stable per-tab nonce so peers can ignore their own echoes.
@@ -308,6 +318,44 @@ async function handleEventPublish(req, res) {
     if (!MODES.has(body.mode)) return j(res, 400, { error: "bad mode" });
     letterModes[letter] = body.mode;
     broadcast({ type: "mode", letter, mode: body.mode, from, ts: Date.now() });
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    return j(res, 202, { ok: true });
+  }
+
+  if (type === "word") {
+    if (!WORDS.has(body.word)) return j(res, 400, { error: "bad word" });
+    currentWord = body.word;
+    broadcast({ type: "word", word: currentWord, from, ts: Date.now() });
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    return j(res, 202, { ok: true });
+  }
+
+  if (type === "vibe") {
+    if (!VIBES.has(body.vibe)) return j(res, 400, { error: "bad vibe" });
+    currentVibe = body.vibe;
+    broadcast({ type: "vibe", vibe: currentVibe, from, ts: Date.now() });
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    return j(res, 202, { ok: true });
+  }
+
+  if (type === "tempo") {
+    const t = Math.max(30, Math.min(180, Math.round(Number(body.tempo) || 60)));
+    currentTempo = t;
+    broadcast({ type: "tempo", tempo: currentTempo, from, ts: Date.now() });
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    return j(res, 202, { ok: true });
+  }
+
+  if (type === "confetti") {
+    // Transient — not persisted. Just fans out.
+    broadcast({ type: "confetti", from, ts: Date.now() });
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    return j(res, 202, { ok: true });
+  }
+
+  if (type === "lamp") {
+    currentLamp = !!body.on;
+    broadcast({ type: "lamp", on: currentLamp, from, ts: Date.now() });
     res.setHeader("Access-Control-Allow-Origin", "*");
     return j(res, 202, { ok: true });
   }

@@ -26,6 +26,36 @@ const E = {
 
 const SPARK_COLORS = ["#ffd54a", "#ffb000"]; // restrained — yellow family only
 
+// ── DICTIONARY: words for the hero, by language code ───────────────────
+// Each renders centered. The N glyphs map to the M-A-Y-O-R "slots" cyclically
+// for color/mode mapping. So for 2-glyph 'zh', the two chars get slots M and A.
+const WORDS = {
+  en: "MAYOR",
+  es: "ALCALDE",
+  fr: "MAIRE",
+  de: "BÜRGER",
+  it: "SINDACO",
+  ja: "市長",
+  zh: "市长",
+  ar: "رئيس",
+  ru: "МЭР",
+  ko: "시장",
+  el: "ΔΉΜΑΡΧΟΣ",
+  he: "ראש",
+};
+
+// ── VIBES: background & palette themes ─────────────────────────────────
+// Each vibe overrides a few CSS variables and the WebGL field's color
+// uniforms. Yellow stays as a default; vibes shift the page mood.
+const VIBES = {
+  default:  { y: "#f0d72a", k: "#060606", deep: [0.42,0.36,0.05], mid: [0.78,0.69,0.12], hi: [1.00,0.83,0.27] },
+  dawn:     { y: "#ffd1a8", k: "#1a0d18", deep: [0.32,0.18,0.18], mid: [0.95,0.55,0.40], hi: [1.00,0.78,0.55] },
+  electric: { y: "#7dd3fc", k: "#040414", deep: [0.10,0.08,0.32], mid: [0.30,0.55,0.95], hi: [0.65,0.85,1.00] },
+  mono:     { y: "#ffffff", k: "#0a0a0a", deep: [0.18,0.18,0.18], mid: [0.55,0.55,0.55], hi: [0.95,0.95,0.95] },
+  forest:   { y: "#34d399", k: "#04140d", deep: [0.05,0.18,0.10], mid: [0.18,0.55,0.32], hi: [0.50,0.85,0.62] },
+  sunset:   { y: "#fb7185", k: "#180810", deep: [0.30,0.10,0.18], mid: [0.95,0.35,0.45], hi: [1.00,0.69,0.42] },
+};
+
 // ── BACKGROUND: WebGL volumetric yellow ─────────────────────────────────
 function initField(canvas) {
   const gl = canvas.getContext("webgl", { antialias: false, alpha: true });
@@ -43,6 +73,9 @@ function initField(canvas) {
     uniform vec2 u_mouse;
     uniform vec2 u_pulse;
     uniform float u_pulseAge;
+    uniform vec3 u_deep;
+    uniform vec3 u_mid;
+    uniform vec3 u_hi;
 
     float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
     float noise(vec2 p) {
@@ -79,10 +112,10 @@ function initField(canvas) {
       vec2 q = vec2(fbm(p + t), fbm(p - t * 0.6));
       float n = fbm(p * 1.5 + q * (0.4 + u_intensity * 0.4));
 
-      // Yellow palette — quiet daylight
-      vec3 deep = vec3(0.42, 0.36, 0.05);   // dark olive
-      vec3 mid_ = vec3(0.78, 0.69, 0.12);   // y-deep
-      vec3 hi   = vec3(1.00, 0.83, 0.27);   // y-warm
+      // Vibe-controlled palette (uniforms)
+      vec3 deep = u_deep;
+      vec3 mid_ = u_mid;
+      vec3 hi   = u_hi;
 
       float light1 = smoothstep(1.5, 0.0, d1);
       float light2 = smoothstep(1.3, 0.0, d2);
@@ -144,6 +177,9 @@ function initField(canvas) {
     mouse: gl.getUniformLocation(prog, "u_mouse"),
     pulse: gl.getUniformLocation(prog, "u_pulse"),
     pulseAge: gl.getUniformLocation(prog, "u_pulseAge"),
+    deep: gl.getUniformLocation(prog, "u_deep"),
+    mid: gl.getUniformLocation(prog, "u_mid"),
+    hi: gl.getUniformLocation(prog, "u_hi"),
   };
 
   let dpr = Math.min(2, window.devicePixelRatio || 1);
@@ -155,7 +191,15 @@ function initField(canvas) {
   resize();
   window.addEventListener("resize", resize);
 
-  let state = { intensity: 0, mouse: [0.5, 0.5], pulse: [0.5, 0.5], pulseStart: -10 };
+  let state = {
+    intensity: 0,
+    mouse: [0.5, 0.5],
+    pulse: [0.5, 0.5],
+    pulseStart: -10,
+    deep: [0.42, 0.36, 0.05],
+    mid: [0.78, 0.69, 0.12],
+    hi: [1.00, 0.83, 0.27],
+  };
   const t0 = performance.now();
 
   let raf = 0;
@@ -167,6 +211,9 @@ function initField(canvas) {
     gl.uniform2f(u.mouse, state.mouse[0], state.mouse[1]);
     gl.uniform2f(u.pulse, state.pulse[0], state.pulse[1]);
     gl.uniform1f(u.pulseAge, t - state.pulseStart);
+    gl.uniform3f(u.deep, state.deep[0], state.deep[1], state.deep[2]);
+    gl.uniform3f(u.mid, state.mid[0], state.mid[1], state.mid[2]);
+    gl.uniform3f(u.hi, state.hi[0], state.hi[1], state.hi[2]);
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
     raf = requestAnimationFrame(tick);
   }
@@ -175,6 +222,7 @@ function initField(canvas) {
   return {
     setIntensity: (v) => { state.intensity = Math.max(0, Math.min(1, v)); },
     setMouse: (x, y) => { state.mouse = [x, y]; },
+    setVibe: (deep, mid, hi) => { state.deep = deep; state.mid = mid; state.hi = hi; },
     triggerPulse: (x, y) => {
       state.pulse = [x, y];
       state.pulseStart = (performance.now() - t0) / 1000;
@@ -326,11 +374,17 @@ export function initMotion(gsap) {
     mid:   document.querySelector('[data-layer="mid"]'),
     shine: document.querySelector('[data-layer="shine"]'),
   };
-  const letters = Array.from(document.querySelectorAll(".ml"));
-  letters.forEach((l) => {
-    l.style.transformBox = "fill-box";
-    l.style.transformOrigin = "center bottom";
-  });
+  // Letters are rebuilt whenever the active word changes. Use a getter so
+  // every consumer sees the current set.
+  let letters = Array.from(document.querySelectorAll(".ml"));
+  function bindLetters() {
+    letters.forEach((l) => {
+      l.style.transformBox = "fill-box";
+      l.style.transformOrigin = "center bottom";
+      // (Re-bind click handlers — they get reattached every rebuild.)
+      l.addEventListener("click", onLetterClick);
+    });
+  }
   const shineRect = document.querySelector("[data-shine-rect]");
   const statNum = document.querySelector("[data-stat-num]");
   const statLab = document.querySelector("[data-stat-lab]");
@@ -561,15 +615,32 @@ export function initMotion(gsap) {
     return null;
   }
 
-  // Letter selection: clicking a MAYOR letter "arms" the palette for it.
-  letters.forEach((l) => {
-    l.addEventListener("click", (e) => {
-      e.stopPropagation();
-      letters.forEach((x) => x.classList.remove("selected"));
-      l.classList.add("selected");
-      selectedLetter = l.dataset.letter;
-    });
-  });
+  // Letter click handler — also tracks click-counts per letter for birthdays.
+  const clickCounts = { M: 0, A: 0, Y: 0, O: 0, R: 0 };
+  function onLetterClick(e) {
+    e.stopPropagation();
+    const l = e.currentTarget;
+    letters.forEach((x) => x.classList.remove("selected"));
+    l.classList.add("selected");
+    selectedLetter = l.dataset.letter;
+    // Birthday: 7 clicks on the same letter triggers a celebration.
+    clickCounts[selectedLetter] = (clickCounts[selectedLetter] || 0) + 1;
+    if (clickCounts[selectedLetter] === 7) {
+      throwBirthday(selectedLetter);
+      // Tell peers
+      fetch(`${SYNC_BASE}/event`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ type: "click", x: 0.5, y: 0.5, from: SELF_ID }),
+        keepalive: true,
+      }).catch(() => {});
+      // (We use a generic 'click' as the trigger and then tell peers via a
+      // confetti broadcast for the global show. The local birthday is for
+      // the actor only — it's a fun secret reward.)
+      clickCounts[selectedLetter] = 0;
+    }
+  }
+  bindLetters();
 
   // Click outside the letters: deselect.
   document.querySelector(".stage").addEventListener("pointerdown", (e) => {
@@ -641,6 +712,285 @@ export function initMotion(gsap) {
     });
   });
 
+  // ── WORD: rebuild letter glyphs to match the chosen language ──────────
+  // Every glyph in the active word becomes its own <text> at a measured x,
+  // mapped cyclically to color/mode slots M-A-Y-O-R. Layout uses getBBox
+  // after a hidden render pass so non-Latin glyph widths stay accurate.
+  const SVG_NS = "http://www.w3.org/2000/svg";
+  const SLOTS = ["M", "A", "Y", "O", "R"];
+  const lettersGroup = document.getElementById("mayor-letters");
+  const backText = document.querySelector("[data-back-text]");
+  const maskText = document.querySelector("[data-mask-text]");
+
+  function rebuildWord(wordKey) {
+    const text = WORDS[wordKey] || WORDS.en;
+    // Update halo + shine mask texts (they're single SVG text nodes).
+    if (backText) backText.textContent = text;
+    if (maskText) maskText.textContent = text;
+
+    // Tear down old letters
+    while (lettersGroup.firstChild) lettersGroup.removeChild(lettersGroup.firstChild);
+
+    // Render each glyph at x=0 first to measure width with getBBox.
+    const chars = Array.from(text);
+    const svg = lettersGroup.ownerSVGElement;
+    const measureG = document.createElementNS(SVG_NS, "g");
+    measureG.setAttribute("font-family", "Display, Arial Narrow Bold, sans-serif");
+    measureG.setAttribute("font-weight", "900");
+    measureG.setAttribute("font-size", "440");
+    measureG.setAttribute("text-anchor", "middle");
+    measureG.style.visibility = "hidden";
+    const tempNodes = chars.map((ch) => {
+      const t = document.createElementNS(SVG_NS, "text");
+      t.setAttribute("x", "0");
+      t.setAttribute("y", "380");
+      t.textContent = ch;
+      measureG.appendChild(t);
+      return t;
+    });
+    svg.appendChild(measureG);
+    const widths = tempNodes.map((t) => t.getBBox().width);
+    svg.removeChild(measureG);
+
+    // Layout: total width with small spacing, then center on x=750.
+    const gap = 16;
+    const totalW = widths.reduce((a, b) => a + b, 0) + gap * (chars.length - 1);
+    let cursor = 750 - totalW / 2;
+    chars.forEach((ch, i) => {
+      const cx = cursor + widths[i] / 2;
+      cursor += widths[i] + gap;
+      const t = document.createElementNS(SVG_NS, "text");
+      t.setAttribute("class", "ml");
+      t.setAttribute("data-letter", SLOTS[i % SLOTS.length]);
+      t.setAttribute("data-mode", "solid");
+      t.setAttribute("x", cx);
+      t.setAttribute("y", "380");
+      t.textContent = ch;
+      lettersGroup.appendChild(t);
+    });
+
+    // Re-query and re-bind the letters array.
+    letters = Array.from(document.querySelectorAll(".ml"));
+    bindLetters();
+  }
+
+  function applyWord(wordKey, animate = true) {
+    if (!WORDS[wordKey]) return;
+    if (animate && lettersGroup) {
+      gsap.to(lettersGroup, {
+        opacity: 0,
+        y: 12,
+        duration: 0.35,
+        ease: "sine.in",
+        onComplete: () => {
+          rebuildWord(wordKey);
+          gsap.fromTo(lettersGroup,
+            { opacity: 0, y: 12 },
+            { opacity: 1, y: 0, duration: 0.6, ease: "expo.out" }
+          );
+        },
+      });
+      // Halo and mask blink with the swap
+      if (backText) {
+        gsap.fromTo(backText, { opacity: 0.0 }, { opacity: 1, duration: 0.6, delay: 0.35, ease: "sine.out" });
+      }
+    } else {
+      rebuildWord(wordKey);
+    }
+  }
+
+  // Wire language buttons
+  const langButtons = Array.from(document.querySelectorAll("[data-langs] button"));
+  langButtons.forEach((b) => {
+    b.addEventListener("click", () => {
+      const word = b.dataset.word;
+      langButtons.forEach((x) => x.classList.toggle("active", x === b));
+      applyWord(word);
+      fetch(`${SYNC_BASE}/event`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ type: "word", word, from: SELF_ID }),
+        keepalive: true,
+      }).catch(() => {});
+    });
+  });
+
+  // ── VIBE: switch background palette + page CSS vars ──────────────────
+  function applyVibe(vibeKey, animate = true) {
+    const v = VIBES[vibeKey] || VIBES.default;
+    if (fieldHandle) fieldHandle.setVibe(v.deep, v.mid, v.hi);
+    const root2 = document.documentElement;
+    if (animate) {
+      gsap.to(root2, { "--y": v.y, "--k": v.k, duration: 1.2, ease: "sine.inOut" });
+    } else {
+      root2.style.setProperty("--y", v.y);
+      root2.style.setProperty("--k", v.k);
+    }
+    root2.dataset.vibe = vibeKey;
+  }
+  Array.from(document.querySelectorAll("[data-vibes] button")).forEach((b) => {
+    b.addEventListener("click", () => {
+      const vibe = b.dataset.vibe;
+      Array.from(document.querySelectorAll("[data-vibes] button")).forEach((x) => x.classList.toggle("active", x === b));
+      applyVibe(vibe);
+      fetch(`${SYNC_BASE}/event`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ type: "vibe", vibe, from: SELF_ID }),
+        keepalive: true,
+      }).catch(() => {});
+    });
+  });
+
+  // ── TEMPO: shared BPM that drives the page heartbeat ─────────────────
+  // The cursor halo, status pin, and an idle letter pulse all sync to it.
+  let tempoBpm = 60;
+  let tempoTween = null;
+  function applyTempo(bpm, animate = true) {
+    tempoBpm = Math.max(30, Math.min(180, bpm | 0));
+    const slider = document.querySelector("[data-tempo]");
+    const bpmEl = document.querySelector("[data-tempo-bpm]");
+    if (slider && Number(slider.value) !== tempoBpm) slider.value = String(tempoBpm);
+    if (bpmEl) bpmEl.textContent = String(tempoBpm);
+    if (tempoTween) tempoTween.kill();
+    if (reduced || !halo) return;
+    const period = 60 / tempoBpm;
+    tempoTween = gsap.to(halo, {
+      scale: 1.25,
+      duration: period * 0.5,
+      ease: "sine.inOut",
+      yoyo: true,
+      repeat: -1,
+    });
+  }
+  const tempoSlider = document.querySelector("[data-tempo]");
+  if (tempoSlider) {
+    let raf = 0;
+    tempoSlider.addEventListener("input", (e) => {
+      const v = Number(e.target.value);
+      applyTempo(v, false);
+      // Throttle the publish so we don't spam the server while dragging
+      if (raf) return;
+      raf = setTimeout(() => {
+        fetch(`${SYNC_BASE}/event`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ type: "tempo", tempo: tempoBpm, from: SELF_ID }),
+          keepalive: true,
+        }).catch(() => {});
+        raf = 0;
+      }, 120);
+    });
+  }
+  applyTempo(60, false);
+
+  // ── CONFETTI: chaotic, multi-color, rains across the screen ───────────
+  function rainConfetti(opts = {}) {
+    if (reduced || !sparksLayer) return;
+    const count = opts.count ?? 80;
+    const colors = ["#f0d72a", "#ffffff", "#ff8a3d", "#7dd3fc", "#a78bfa", "#34d399", "#f472b6", "#fb7185"];
+    for (let i = 0; i < count; i++) {
+      const el = document.createElement("div");
+      el.className = "confetti";
+      const color = colors[Math.floor(Math.random() * colors.length)];
+      const size = 6 + Math.random() * 10;
+      el.style.width = `${size}px`;
+      el.style.height = `${size * 0.5}px`;
+      el.style.background = color;
+      el.style.boxShadow = `0 0 12px ${color}`;
+      const startX = Math.random() * window.innerWidth;
+      el.style.left = `${startX}px`;
+      el.style.top = `-30px`;
+      el.style.transform = `rotate(${Math.random() * 360}deg)`;
+      sparksLayer.appendChild(el);
+      const driftX = (Math.random() - 0.5) * 220;
+      const fallY = window.innerHeight + 80;
+      const dur = 1.6 + Math.random() * 1.6;
+      gsap.to(el, {
+        x: driftX,
+        y: fallY,
+        rotation: `+=${(Math.random() - 0.5) * 720}`,
+        duration: dur,
+        ease: "sine.in",
+        delay: Math.random() * 0.4,
+      });
+      gsap.to(el, {
+        opacity: 0,
+        duration: 0.5,
+        delay: dur - 0.3,
+        onComplete: () => el.remove(),
+      });
+    }
+  }
+  document.querySelector("[data-confetti]")?.addEventListener("click", () => {
+    rainConfetti();
+    fetch(`${SYNC_BASE}/event`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ type: "confetti", from: SELF_ID }),
+      keepalive: true,
+    }).catch(() => {});
+  });
+
+  // ── LAMP: light/dark mode toggle, synced to peers ────────────────────
+  let lampOn = false;
+  function applyLamp(on) {
+    lampOn = !!on;
+    document.documentElement.classList.toggle("lamp-on", lampOn);
+  }
+  document.querySelector("[data-lamp]")?.addEventListener("click", () => {
+    applyLamp(!lampOn);
+    fetch(`${SYNC_BASE}/event`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ type: "lamp", on: lampOn, from: SELF_ID }),
+      keepalive: true,
+    }).catch(() => {});
+  });
+
+  // ── BIRTHDAY: 7 clicks on a letter → other 4 sing happy birthday ─────
+  function throwBirthday(birthdayLetter) {
+    if (reduced) return;
+    const others = letters.filter((l) => l.dataset.letter !== birthdayLetter);
+    // Other letters do a sequential bow-and-jump
+    others.forEach((l, i) => {
+      gsap.timeline()
+        .to(l, { y: -20, scale: 1.15, duration: 0.3, ease: "back.out(2)", delay: i * 0.12 })
+        .to(l, { y: 0,   scale: 1,    duration: 0.7, ease: E.bounce });
+    });
+    // Cake emoji floats up from below the birthday letter
+    const target = letters.find((l) => l.dataset.letter === birthdayLetter);
+    if (target && sparksLayer) {
+      const r = target.getBoundingClientRect();
+      const cake = document.createElement("div");
+      cake.textContent = "🎂";
+      cake.style.position = "fixed";
+      cake.style.left = `${r.left + r.width / 2}px`;
+      cake.style.top = `${r.top + r.height + 20}px`;
+      cake.style.transform = "translate(-50%,-50%) scale(0)";
+      cake.style.fontSize = "64px";
+      cake.style.zIndex = "20";
+      cake.style.pointerEvents = "none";
+      cake.style.filter = "drop-shadow(0 8px 24px rgba(0,0,0,0.6))";
+      sparksLayer.appendChild(cake);
+      gsap.fromTo(cake,
+        { scale: 0, opacity: 0 },
+        { scale: 1.4, opacity: 1, duration: 0.5, ease: "back.out(2)" }
+      );
+      gsap.to(cake, {
+        y: -240,
+        scale: 1,
+        opacity: 0,
+        duration: 2.6,
+        delay: 0.5,
+        ease: "power2.out",
+        onComplete: () => cake.remove(),
+      });
+    }
+    // Confetti for ambience
+    rainConfetti({ count: 40 });
+  }
+
   // Open SSE connection for incoming events.
   let es = null;
   function connectSync() {
@@ -664,6 +1014,30 @@ export function initMotion(gsap) {
             for (const [letter, mode] of Object.entries(ev.modes || {})) {
               applyLetterMode(letter, mode, false);
             }
+            return;
+          }
+          if (ev.type === "word") {
+            applyWord(ev.word, true);
+            // Mark the active language button (if it exists)
+            langButtons.forEach((x) => x.classList.toggle("active", x.dataset.word === ev.word));
+            return;
+          }
+          if (ev.type === "vibe") {
+            applyVibe(ev.vibe, true);
+            Array.from(document.querySelectorAll("[data-vibes] button"))
+              .forEach((x) => x.classList.toggle("active", x.dataset.vibe === ev.vibe));
+            return;
+          }
+          if (ev.type === "tempo") {
+            applyTempo(ev.tempo, false);
+            return;
+          }
+          if (ev.type === "confetti") {
+            rainConfetti();
+            return;
+          }
+          if (ev.type === "lamp") {
+            applyLamp(ev.on);
             return;
           }
           // Ignore our own echoes
