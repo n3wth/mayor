@@ -1503,6 +1503,260 @@ export function initMotion(gsap) {
   }
   if (!reduced) nightRaf = requestAnimationFrame(nightTick);
 
+  // ── PATTERN GALAXY ─────────────────────────────────────────────────
+  // Press 'g' to summon a 12-star constellation of preset grooves.
+  // Each star = a famous 16-step pattern across the 5 MAYOR rows.
+  // Click → load locally + broadcast the diff so the room jumps with you.
+  // Esc closes. Yellow on black, organic spiral layout (golden angle).
+  const PATTERN_GALAXY = [
+    {
+      name: "Four on the Floor",
+      M: [1,0,0,0,1,0,0,0,1,0,0,0,1,0,0,0],
+      A: [0,0,0,0,1,0,0,0,0,0,0,0,1,0,0,0],
+      Y: [0,0,1,0,0,0,1,0,0,0,1,0,0,0,1,0],
+      O: [1,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0],
+      R: [1,0,0,0,1,0,0,0,1,0,0,0,1,0,0,0],
+    },
+    {
+      name: "Breakbeat",
+      M: [1,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0],
+      A: [0,0,0,0,1,0,0,0,0,0,0,0,1,0,1,0],
+      Y: [1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0],
+      O: [1,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0],
+      R: [0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0],
+    },
+    {
+      name: "Dembow",
+      M: [1,0,0,1,0,0,1,0,1,0,0,1,0,0,1,0],
+      A: [0,0,0,0,1,0,0,0,0,0,0,0,1,0,0,0],
+      Y: [0,0,1,0,0,0,1,0,0,0,1,0,0,0,1,0],
+      O: [1,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0],
+      R: [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    },
+    {
+      name: "Jungle",
+      M: [1,0,0,0,1,0,0,0,0,0,0,0,1,0,0,0],
+      A: [0,0,0,0,1,0,0,0,0,0,0,0,1,0,0,1],
+      Y: [1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0],
+      O: [0,0,0,0,0,0,0,1,0,0,0,1,0,0,0,0],
+      R: [0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0],
+    },
+    {
+      name: "Half-Time",
+      M: [1,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0],
+      A: [0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0],
+      Y: [1,0,0,0,1,0,1,0,1,0,0,0,1,0,1,0],
+      O: [1,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0],
+      R: [0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0],
+    },
+    {
+      name: "Bossa Nova",
+      M: [1,0,0,0,0,1,0,0,0,0,0,1,0,0,0,0],
+      A: [0,0,0,1,0,0,0,0,0,1,0,0,1,0,0,0],
+      Y: [0,0,1,0,0,0,1,0,0,0,1,0,0,0,1,0],
+      O: [1,0,0,0,1,0,0,0,1,0,0,0,1,0,0,0],
+      R: [1,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0],
+    },
+    {
+      name: "Samba",
+      M: [1,0,0,0,1,0,0,0,1,0,0,0,1,0,0,0],
+      A: [0,0,1,0,0,0,0,1,0,0,1,0,0,0,0,1],
+      Y: [1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0],
+      O: [1,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0],
+      R: [0,0,0,0,1,0,0,0,0,0,0,0,1,0,0,0],
+    },
+    {
+      name: "Trap",
+      M: [1,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0],
+      A: [0,0,0,0,1,0,0,0,0,0,0,0,1,0,0,0],
+      Y: [1,0,1,0,1,0,1,0,1,0,1,1,1,1,1,1],
+      O: [1,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0],
+      R: [0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0],
+    },
+    {
+      name: "Swing",
+      M: [1,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0],
+      A: [0,0,0,0,1,0,0,0,0,0,0,0,1,0,0,0],
+      Y: [1,0,0,1,1,0,0,1,1,0,0,1,1,0,0,1],
+      O: [1,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0],
+      R: [0,0,1,0,0,0,0,0,0,0,1,0,0,0,0,0],
+    },
+    {
+      name: "Motorik",
+      M: [1,0,0,0,1,0,0,0,1,0,0,0,1,0,0,0],
+      A: [0,0,0,0,1,0,0,0,0,0,0,0,1,0,0,0],
+      Y: [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],
+      O: [1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0],
+      R: [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+    },
+    {
+      name: "Gospel Chop",
+      M: [1,0,0,0,1,0,0,1,1,0,1,0,0,0,1,0],
+      A: [0,0,0,0,1,0,0,0,0,0,0,0,1,0,0,0],
+      Y: [0,0,1,0,0,0,1,0,0,0,1,0,0,0,1,0],
+      O: [1,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0],
+      R: [0,0,0,0,1,0,0,0,0,0,0,0,1,0,0,0],
+    },
+    {
+      name: "Footwork",
+      M: [1,0,0,1,0,0,0,1,0,0,1,0,0,1,0,0],
+      A: [0,0,0,0,1,0,0,0,0,0,0,0,1,0,0,0],
+      Y: [1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0],
+      O: [1,0,0,0,0,0,0,0,1,0,0,1,0,0,0,0],
+      R: [0,0,0,0,0,1,0,0,0,0,0,0,0,1,0,0],
+    },
+  ];
+
+  // Inject galaxy CSS once (kept terse — no shadows, no glows beyond the
+  // existing yellow-on-black palette already used by the seq grid).
+  if (!document.getElementById("galaxy-style")) {
+    const gs = document.createElement("style");
+    gs.id = "galaxy-style";
+    gs.textContent = `
+      .galaxy {
+        position: fixed; inset: 0; z-index: 30;
+        background: rgba(5,5,5,0.86);
+        display: none;
+        cursor: crosshair;
+        font: 600 12px/1 ui-monospace, "JetBrains Mono", monospace;
+        letter-spacing: 0.06em;
+      }
+      .galaxy.open { display: block; }
+      .galaxy .gx-hint {
+        position: absolute; top: 16px; left: 50%;
+        transform: translateX(-50%);
+        color: var(--y, #f0d72a);
+        text-transform: uppercase;
+        opacity: 0.7;
+      }
+      .galaxy .gx-star {
+        position: absolute;
+        width: 22px; height: 22px;
+        margin: -11px 0 0 -11px;
+        border-radius: 50%;
+        background: var(--y, #f0d72a);
+        border: 2px solid #050505;
+        cursor: pointer;
+        transition: transform .15s ease, width .15s ease, height .15s ease;
+        padding: 0;
+      }
+      .galaxy .gx-star:hover,
+      .galaxy .gx-star:focus {
+        transform: scale(1.35);
+        outline: none;
+      }
+      .galaxy .gx-label {
+        position: absolute;
+        color: var(--y, #f0d72a);
+        background: #050505;
+        padding: 4px 8px;
+        border: 1px solid var(--y, #f0d72a);
+        text-transform: uppercase;
+        white-space: nowrap;
+        pointer-events: none;
+        opacity: 0;
+        transform: translate(-50%, -32px);
+        transition: opacity .12s ease;
+      }
+      .galaxy .gx-star:hover + .gx-label,
+      .galaxy .gx-star:focus + .gx-label { opacity: 1; }
+    `;
+    document.head.appendChild(gs);
+  }
+
+  // Build the overlay once, lazy.
+  let galaxyEl = null;
+  function buildGalaxy() {
+    if (galaxyEl) return galaxyEl;
+    galaxyEl = document.createElement("div");
+    galaxyEl.className = "galaxy";
+    galaxyEl.setAttribute("role", "dialog");
+    galaxyEl.setAttribute("aria-label", "Pattern Galaxy");
+    const hint = document.createElement("div");
+    hint.className = "gx-hint";
+    hint.textContent = "Pattern Galaxy — click a star, Esc to close";
+    galaxyEl.appendChild(hint);
+    // Golden-angle spiral so the 12 stars feel organic, not gridded.
+    const PHI = Math.PI * (3 - Math.sqrt(5));
+    PATTERN_GALAXY.forEach((p, i) => {
+      const t = (i + 0.5) / PATTERN_GALAXY.length;
+      const r = 0.18 + 0.30 * Math.sqrt(t);
+      const a = i * PHI;
+      const star = document.createElement("button");
+      star.className = "gx-star";
+      star.type = "button";
+      star.setAttribute("aria-label", p.name);
+      star.style.left = `${50 + Math.cos(a) * r * 100}%`;
+      star.style.top  = `${50 + Math.sin(a) * r * 100}%`;
+      star.addEventListener("click", (e) => {
+        e.stopPropagation();
+        loadGalaxyPattern(p);
+        closeGalaxy();
+      });
+      const label = document.createElement("div");
+      label.className = "gx-label";
+      label.textContent = p.name;
+      label.style.left = star.style.left;
+      label.style.top = star.style.top;
+      galaxyEl.appendChild(star);
+      galaxyEl.appendChild(label);
+    });
+    // Click outside any star closes
+    galaxyEl.addEventListener("click", (e) => {
+      if (e.target === galaxyEl) closeGalaxy();
+    });
+    document.body.appendChild(galaxyEl);
+    return galaxyEl;
+  }
+  function openGalaxy() {
+    buildGalaxy().classList.add("open");
+  }
+  function closeGalaxy() {
+    if (galaxyEl) galaxyEl.classList.remove("open");
+  }
+  // Loading: diff against the current grid, set DOM + seqGrid + broadcast,
+  // staggered 5ms apart so the inbox doesn't get a burst.
+  function loadGalaxyPattern(p) {
+    if (!seqEl) return;
+    let delay = 0;
+    for (const L of SEQ_LETTERS) {
+      const row = p[L] || [];
+      for (let i = 0; i < SEQ_STEPS; i++) {
+        const next = !!row[i];
+        if (seqGrid[L][i] === next) continue;
+        seqGrid[L][i] = next;
+        const c = seqEl.querySelector(`.cell[data-letter="${L}"][data-idx="${i}"]`);
+        if (c) c.classList.toggle("on", next);
+        const letter = L, idx = i, on = next;
+        setTimeout(() => {
+          fetch(`${SYNC_BASE}/event`, {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ type: "step", letter, idx, on, from: SELF_ID }),
+            keepalive: true,
+          }).catch(() => {});
+        }, delay);
+        delay += 5;
+      }
+    }
+  }
+  // Separate keydown — won't interfere with konami because we ignore when
+  // the user is mid-typing in an input/textarea, and we only act on bare 'g'.
+  window.addEventListener("keydown", (e) => {
+    if (e.defaultPrevented) return;
+    const tag = (e.target && e.target.tagName) || "";
+    if (tag === "INPUT" || tag === "TEXTAREA" || (e.target && e.target.isContentEditable)) return;
+    if (e.metaKey || e.ctrlKey || e.altKey) return;
+    if (e.key === "Escape" && galaxyEl && galaxyEl.classList.contains("open")) {
+      closeGalaxy();
+      return;
+    }
+    if (e.key === "g" || e.key === "G") {
+      if (galaxyEl && galaxyEl.classList.contains("open")) closeGalaxy();
+      else openGalaxy();
+    }
+  });
+
   // ── CLEANUP ──
   const onPageHide = () => {
     clearInterval(pollInterval);
