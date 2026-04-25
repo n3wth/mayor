@@ -3395,6 +3395,467 @@ export function initMotion(gsap) {
     try { narratorEl.remove(); } catch {}
   }
 
+  // ── THE HUNT: secret discoveries ─────────────────────────────────────
+  // 7 hidden combinations. Each persists per-visitor in localStorage.
+  // Press '?' (Shift+/) to toggle a small overlay listing what's been found.
+  // Listeners run alongside existing keydown/click handlers — they don't
+  // intercept or preventDefault, just observe.
+  const HUNT_KEY = "mayor.hunt.v1";
+  const HUNT_DEFS = [
+    { id: "mayor",  name: "you spelled it." },
+    { id: "grrr",   name: "the mayor is angry." },
+    { id: "wtf",    name: "wtf indeed." },
+    { id: "wave",   name: "rising tide." },
+    { id: "silence",name: "the silence." },
+    { id: "voices", name: "five voices." },
+    { id: "echo",   name: "echo echo echo." },
+  ];
+  function huntLoad() {
+    try {
+      const raw = localStorage.getItem(HUNT_KEY);
+      if (!raw) return new Set();
+      const arr = JSON.parse(raw);
+      return new Set(Array.isArray(arr) ? arr : []);
+    } catch { return new Set(); }
+  }
+  function huntSave(set) {
+    try { localStorage.setItem(HUNT_KEY, JSON.stringify(Array.from(set))); } catch {}
+  }
+  const huntFound = huntLoad();
+
+  // Inject overlay style + toast style once.
+  if (!document.getElementById("hunt-style")) {
+    const hs = document.createElement("style");
+    hs.id = "hunt-style";
+    hs.textContent = `
+      .hunt-overlay {
+        position: fixed;
+        top: clamp(20px, 3vw, 28px);
+        left: 50%;
+        transform: translateX(-50%) translateY(-8px);
+        z-index: 60;
+        pointer-events: none;
+        padding: 14px 18px;
+        min-width: 220px;
+        max-width: 360px;
+        border-radius: 10px;
+        border: 1px solid rgba(255,255,255,0.10);
+        background: rgba(8,8,10,0.78);
+        -webkit-backdrop-filter: blur(14px);
+        backdrop-filter: blur(14px);
+        font-family: var(--mono);
+        color: rgba(255,255,255,0.78);
+        font-size: 11px;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        opacity: 0;
+        transition: opacity .25s ease, transform .25s ease;
+      }
+      .hunt-overlay.open {
+        opacity: 1;
+        transform: translateX(-50%) translateY(0);
+      }
+      .hunt-overlay h4 {
+        font-family: var(--mono);
+        font-size: 10.5px;
+        font-weight: 600;
+        color: var(--y, #f0d72a);
+        letter-spacing: 0.22em;
+        margin-bottom: 10px;
+      }
+      .hunt-overlay ul { list-style: none; padding: 0; margin: 0; }
+      .hunt-overlay li {
+        padding: 4px 0;
+        font-size: 10.5px;
+        letter-spacing: 0.12em;
+        color: rgba(255,255,255,0.55);
+      }
+      .hunt-overlay li.found { color: var(--w, #fff); }
+      .hunt-overlay li.found::before {
+        content: "+ ";
+        color: var(--y, #f0d72a);
+      }
+      .hunt-overlay li:not(.found)::before {
+        content: "- ";
+        color: rgba(255,255,255,0.25);
+      }
+      .hunt-toast {
+        position: fixed;
+        bottom: calc(clamp(38px, 6vh, 64px) + 80px);
+        left: 50%;
+        transform: translateX(-50%) translateY(8px);
+        z-index: 60;
+        pointer-events: none;
+        padding: 10px 18px;
+        border-radius: 999px;
+        border: 1px solid rgba(240,215,42,0.45);
+        background: rgba(8,8,10,0.72);
+        -webkit-backdrop-filter: blur(14px);
+        backdrop-filter: blur(14px);
+        color: var(--y, #f0d72a);
+        font-family: var(--mono);
+        font-size: 11px;
+        letter-spacing: 0.18em;
+        text-transform: uppercase;
+        opacity: 0;
+        transition: opacity .35s ease, transform .35s ease;
+      }
+      .hunt-toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+    `;
+    document.head.appendChild(hs);
+  }
+
+  // Overlay element (built lazily on first ?)
+  let huntOverlayEl = null;
+  let huntOverlayOpen = false;
+  function buildHuntOverlay() {
+    if (huntOverlayEl) return huntOverlayEl;
+    const el = document.createElement("div");
+    el.className = "hunt-overlay";
+    el.setAttribute("aria-live", "polite");
+    document.body.appendChild(el);
+    huntOverlayEl = el;
+    return el;
+  }
+  function renderHuntOverlay() {
+    const el = buildHuntOverlay();
+    const total = HUNT_DEFS.length;
+    const got = huntFound.size;
+    const items = HUNT_DEFS.map((d) => {
+      const found = huntFound.has(d.id);
+      return `<li class="${found ? "found" : ""}">${found ? d.name : "????????"}</li>`;
+    }).join("");
+    el.innerHTML = `<h4>${got}/${total} discovered</h4><ul>${items}</ul>`;
+  }
+  function setHuntOverlay(open) {
+    huntOverlayOpen = !!open;
+    const el = buildHuntOverlay();
+    if (huntOverlayOpen) {
+      renderHuntOverlay();
+      el.classList.add("open");
+    } else {
+      el.classList.remove("open");
+    }
+  }
+
+  // Toast: a brief reward name flash on discovery.
+  function huntToast(name) {
+    const el = document.createElement("div");
+    el.className = "hunt-toast";
+    el.textContent = name;
+    document.body.appendChild(el);
+    requestAnimationFrame(() => el.classList.add("show"));
+    setTimeout(() => {
+      el.classList.remove("show");
+      setTimeout(() => { try { el.remove(); } catch {} }, 500);
+    }, 2200);
+  }
+
+  function huntUnlock(id) {
+    if (huntFound.has(id)) return false;
+    huntFound.add(id);
+    huntSave(huntFound);
+    const def = HUNT_DEFS.find((d) => d.id === id);
+    if (def) huntToast(def.name);
+    if (huntOverlayOpen) renderHuntOverlay();
+    return true;
+  }
+
+  // Reward sound — small chord using existing pluck. Skipped silently when
+  // sound is off; the visual still plays.
+  function huntChord(notes, gap = 0.06, vel = 0.55) {
+    if (!soundOn || !pluckSynth) return;
+    notes.forEach((n, i) => pluck(n, i * gap, vel));
+  }
+
+  // ── Secret 1: typing "MAYOR" → all letters backflip + descending chord.
+  // ── Secret 2: typing "GRRR" → red tint + hero rotates 360.
+  // ── Secret 3: typing "WTF" → letters scramble, then settle.
+  // Single rolling buffer of last 5 keys (uppercase letters only).
+  const huntKeyBuf = [];
+  function pushHuntKey(k) {
+    huntKeyBuf.push(k);
+    if (huntKeyBuf.length > 5) huntKeyBuf.shift();
+  }
+  function huntBufEndsWith(seq) {
+    if (huntKeyBuf.length < seq.length) return false;
+    for (let i = 0; i < seq.length; i++) {
+      if (huntKeyBuf[huntKeyBuf.length - seq.length + i] !== seq[i]) return false;
+    }
+    return true;
+  }
+
+  // Visual: synchronized backflip + descending 5-note chord (D5→A4→F4→C4→A3).
+  function fireSecretMayor() {
+    if (!reduced) {
+      gsap.to(letters, {
+        rotationX: "+=360",
+        duration: 1.2,
+        ease: "expo.inOut",
+        stagger: 0.0,
+        transformPerspective: 800,
+      });
+    }
+    huntChord(["D5", "A4", "F4", "C4", "A3"], 0.09, 0.6);
+    huntUnlock("mayor");
+  }
+
+  // Visual: red flash overlay + hero spins 360.
+  function fireSecretGrrr() {
+    if (!reduced) {
+      const flash = document.createElement("div");
+      flash.style.cssText = [
+        "position:fixed",
+        "inset:0",
+        "z-index:55",
+        "pointer-events:none",
+        "background:rgba(220,40,40,0.55)",
+        "opacity:0",
+        "mix-blend-mode:multiply",
+      ].join(";");
+      document.body.appendChild(flash);
+      gsap.to(flash, { opacity: 1, duration: 0.18, ease: "power2.out" });
+      gsap.to(flash, { opacity: 0, duration: 0.6, delay: 0.3, ease: "power2.in",
+        onComplete: () => { try { flash.remove(); } catch {} } });
+      gsap.to(".hero", { rotation: 360, duration: 1.0, ease: "expo.inOut",
+        onComplete: () => { gsap.set(".hero", { rotation: 0 }); } });
+      if (fieldHandle) fieldHandle.triggerChaos(0.7);
+    }
+    huntChord(["F#3", "F3", "E3"], 0.05, 0.55);
+    huntUnlock("grrr");
+  }
+
+  // Visual: scramble letter offsets randomly, then settle back.
+  function fireSecretWtf() {
+    if (!reduced) {
+      letters.forEach((l) => {
+        const dx = (Math.random() - 0.5) * 80;
+        const dy = (Math.random() - 0.5) * 60;
+        const rot = (Math.random() - 0.5) * 60;
+        gsap.to(l, {
+          x: dx, y: dy, rotation: rot,
+          duration: 0.18, ease: "power3.out",
+        });
+        gsap.to(l, {
+          x: 0, y: 0, rotation: 0,
+          duration: 1.1, delay: 0.3,
+          ease: "elastic.out(1, 0.55)",
+        });
+      });
+    }
+    huntChord(["C4", "F#4", "B4"], 0.04, 0.45);
+    huntUnlock("wtf");
+  }
+
+  // ── Secret 4: click M, then A, then Y in order within 2s → wave + chord.
+  const clickSeqState = { idx: 0, last: 0 };
+  const CLICK_SEQ = ["M", "A", "Y"];
+  function tryClickSeq(letterChar) {
+    const now = Date.now();
+    if (now - clickSeqState.last > 2000) clickSeqState.idx = 0;
+    if (letterChar === CLICK_SEQ[clickSeqState.idx]) {
+      clickSeqState.idx++;
+      clickSeqState.last = now;
+      if (clickSeqState.idx >= CLICK_SEQ.length) {
+        clickSeqState.idx = 0;
+        fireSecretWave();
+      }
+    } else if (letterChar === CLICK_SEQ[0]) {
+      clickSeqState.idx = 1;
+      clickSeqState.last = now;
+    } else {
+      clickSeqState.idx = 0;
+    }
+  }
+
+  // Visual: letters rise like a wave (left → right), each comes back.
+  function fireSecretWave() {
+    if (!reduced) {
+      letters.forEach((l, i) => {
+        gsap.to(l, {
+          yPercent: -22,
+          duration: 0.32,
+          delay: i * 0.08,
+          ease: "power2.out",
+        });
+        gsap.to(l, {
+          yPercent: 0,
+          duration: 0.9,
+          delay: i * 0.08 + 0.32,
+          ease: "elastic.out(1, 0.55)",
+        });
+      });
+    }
+    huntChord(["A3", "C4", "E4", "G4", "A4"], 0.08, 0.55);
+    huntUnlock("wave");
+  }
+
+  // Hook letter clicks: data-letter on .ml elements.
+  letters.forEach((l) => {
+    l.addEventListener("click", () => {
+      const L = l.dataset.letter;
+      if (L) tryClickSeq(L);
+    });
+  });
+
+  // ── Secret 5: hold space for 2s → black, then starburst explosion.
+  const spaceState = { down: false, holdTimer: 0, fired: false };
+  function fireSecretSilence() {
+    if (spaceState.fired) return;
+    spaceState.fired = true;
+    if (!reduced) {
+      const black = document.createElement("div");
+      black.style.cssText = [
+        "position:fixed",
+        "inset:0",
+        "z-index:58",
+        "pointer-events:none",
+        "background:rgba(0,0,0,1)",
+        "opacity:0",
+      ].join(";");
+      document.body.appendChild(black);
+      gsap.to(black, { opacity: 1, duration: 0.25, ease: "power2.in",
+        onComplete: () => {
+          // Brief pause, then burst.
+          setTimeout(() => {
+            gsap.to(black, { opacity: 0, duration: 0.5, ease: "power3.out",
+              onComplete: () => { try { black.remove(); } catch {} } });
+            // Starburst: 18 ripples spreading outward from center.
+            const cx = window.innerWidth / 2;
+            const cy = window.innerHeight / 2;
+            const N = 18;
+            for (let i = 0; i < N; i++) {
+              const angle = (i / N) * Math.PI * 2;
+              const dist = 220 + Math.random() * 180;
+              const x = cx + Math.cos(angle) * dist;
+              const y = cy + Math.sin(angle) * dist;
+              setTimeout(() => {
+                if (ripplesHandle) ripplesHandle.add(x, y, false);
+              }, i * 18);
+            }
+            if (fieldHandle) {
+              fieldHandle.triggerPulse(0.5, 0.5);
+              fieldHandle.triggerChaos(0.8);
+            }
+            if (soundOn && pluckSynth) {
+              ["A2", "E3", "A3", "C4", "E4", "A4", "C5", "E5"].forEach((n, i) => pluck(n, i * 0.04, 0.5));
+            }
+          }, 180);
+        }
+      });
+    } else {
+      huntChord(["A2", "E3", "A3", "C4", "E4"], 0.05, 0.55);
+    }
+    huntUnlock("silence");
+  }
+
+  // ── Secret 6: click 5 different cells in 5 different rows → arpeggio.
+  const cellRowsHit = new Set();
+  if (seqEl) {
+    seqEl.addEventListener("click", (e) => {
+      const cell = e.target && e.target.classList && e.target.classList.contains("cell")
+        ? e.target : null;
+      if (!cell) return;
+      const L = cell.dataset.letter;
+      if (!L || huntFound.has("voices")) return;
+      cellRowsHit.add(L);
+      if (cellRowsHit.size >= 5) {
+        fireSecretVoices();
+      }
+    }, true);
+  }
+
+  function fireSecretVoices() {
+    // Completion arpeggio: ascending pent across 5 voices.
+    huntChord(["A3", "C4", "E4", "G4", "A4"], 0.10, 0.6);
+    if (!reduced && fieldHandle) fieldHandle.triggerPulse(0.5, 0.5);
+    huntUnlock("voices");
+  }
+
+  // ── Secret 7: triple-click anywhere → 3x ripple bloom.
+  const tripleState = { count: 0, last: 0, x: 0, y: 0 };
+  window.addEventListener("click", (e) => {
+    const now = Date.now();
+    // Reset if too slow or moved far between clicks.
+    if (now - tripleState.last > 500
+        || Math.abs(e.clientX - tripleState.x) > 30
+        || Math.abs(e.clientY - tripleState.y) > 30) {
+      tripleState.count = 1;
+    } else {
+      tripleState.count++;
+    }
+    tripleState.last = now;
+    tripleState.x = e.clientX;
+    tripleState.y = e.clientY;
+    if (tripleState.count >= 3) {
+      tripleState.count = 0;
+      fireSecretEcho(e.clientX, e.clientY);
+    }
+  }, { capture: true, passive: true });
+
+  function fireSecretEcho(x, y) {
+    // 3x ripple bloom — three concentric rings staggered.
+    if (ripplesHandle) {
+      ripplesHandle.add(x, y, true);
+      setTimeout(() => { if (ripplesHandle) ripplesHandle.add(x, y, false); }, 140);
+      setTimeout(() => { if (ripplesHandle) ripplesHandle.add(x, y, false); }, 300);
+    }
+    if (fieldHandle) fieldHandle.triggerPulse(x / window.innerWidth, 1 - y / window.innerHeight);
+    huntChord(["E4", "E4", "E4"], 0.14, 0.45);
+    huntUnlock("echo");
+  }
+
+  // ── Single keydown listener: typed buffer, space-hold, '?' overlay.
+  // Runs alongside existing handlers — never preventDefault.
+  window.addEventListener("keydown", (e) => {
+    const t = e.target;
+    if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
+    // '?' = Shift+/ on most layouts. Toggle overlay.
+    if (e.key === "?" && !e.metaKey && !e.ctrlKey && !e.altKey) {
+      setHuntOverlay(!huntOverlayOpen);
+      return;
+    }
+    // Space-hold for silence secret. Track first keydown only (ignore repeat).
+    if (e.code === "Space" && !e.metaKey && !e.ctrlKey && !e.altKey) {
+      if (!spaceState.down && !e.repeat) {
+        spaceState.down = true;
+        spaceState.fired = false;
+        if (spaceState.holdTimer) clearTimeout(spaceState.holdTimer);
+        spaceState.holdTimer = setTimeout(() => {
+          if (spaceState.down) fireSecretSilence();
+        }, 2000);
+      }
+      // Don't return — allow the buffer below to also see the key (but space
+      // isn't a letter so the buffer ignores it anyway).
+    }
+    // Letter buffer: only A-Z, ignore modifiers (except shift for capitalization).
+    if (e.metaKey || e.ctrlKey || e.altKey) return;
+    const k = (e.key || "").toUpperCase();
+    if (k.length !== 1) return;
+    if (k < "A" || k > "Z") return;
+    pushHuntKey(k);
+    if (huntBufEndsWith(["M","A","Y","O","R"])) {
+      huntKeyBuf.length = 0;
+      fireSecretMayor();
+    } else if (huntBufEndsWith(["G","R","R","R"])) {
+      huntKeyBuf.length = 0;
+      fireSecretGrrr();
+    } else if (huntBufEndsWith(["W","T","F"])) {
+      huntKeyBuf.length = 0;
+      fireSecretWtf();
+    }
+  });
+
+  window.addEventListener("keyup", (e) => {
+    if (e.code === "Space") {
+      spaceState.down = false;
+      if (spaceState.holdTimer) {
+        clearTimeout(spaceState.holdTimer);
+        spaceState.holdTimer = 0;
+      }
+    }
+  });
+
   // ── CLEANUP ──
   const onPageHide = () => {
     clearInterval(pollInterval);
@@ -3408,6 +3869,8 @@ export function initMotion(gsap) {
     if (ghostState.recordTimeout) clearTimeout(ghostState.recordTimeout);
     cancelGhostPlayback();
     destroyNarrator();
+    if (spaceState.holdTimer) clearTimeout(spaceState.holdTimer);
+    if (huntOverlayEl) { try { huntOverlayEl.remove(); } catch {} huntOverlayEl = null; }
     if (fieldHandle) fieldHandle.destroy();
     if (starsHandle) starsHandle.destroy();
     if (auroraHandle) auroraHandle.destroy();
@@ -3433,6 +3896,8 @@ export function initMotion(gsap) {
       if (ghostState.recordTimeout) clearTimeout(ghostState.recordTimeout);
       cancelGhostPlayback();
       destroyNarrator();
+      if (spaceState.holdTimer) clearTimeout(spaceState.holdTimer);
+      if (huntOverlayEl) { try { huntOverlayEl.remove(); } catch {} huntOverlayEl = null; }
       if (fieldHandle) fieldHandle.destroy();
       if (starsHandle) starsHandle.destroy();
       if (auroraHandle) auroraHandle.destroy();
