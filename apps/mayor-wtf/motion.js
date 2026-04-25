@@ -233,6 +233,93 @@ function initStars(canvas) {
   };
 }
 
+// ── AURORA CURTAINS ──────────────────────────────────────────────────────
+// Three slow vertical gauze ribbons drifting from top to bottom. Each is a
+// tall yellow band with sine-wave horizontal displacement, rendered with
+// screen blend, low alpha, top→transparent gradient. ~30–50s vertical cycle.
+// Adds atmospheric depth behind MAYOR without distracting from the type.
+function initAurora(canvas) {
+  if (!canvas) return null;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return null;
+  let dpr = Math.min(2, window.devicePixelRatio || 1);
+  let W = 0, H = 0;
+  function resize() {
+    canvas.width = (canvas.clientWidth * dpr) | 0;
+    canvas.height = (canvas.clientHeight * dpr) | 0;
+    W = canvas.width; H = canvas.height;
+  }
+  resize();
+  window.addEventListener("resize", resize);
+
+  // Three ribbons — each with its own horizontal anchor, width, drift period,
+  // wave amplitude, wave frequency, and phase offset. Periods are long
+  // (30–50s) so the eye reads "slow weather," not "animation."
+  const ribbons = [
+    { xFrac: 0.22, width: 0.30, period: 38, amp: 0.06, freq: 1.1, phase: 0.0,  alpha: 0.085 },
+    { xFrac: 0.50, width: 0.42, period: 46, amp: 0.04, freq: 0.7, phase: 1.7,  alpha: 0.070 },
+    { xFrac: 0.78, width: 0.34, period: 32, amp: 0.07, freq: 1.4, phase: 3.3,  alpha: 0.095 },
+  ];
+
+  const t0 = performance.now();
+  let raf = 0;
+  let paused = false;
+  document.addEventListener("visibilitychange", () => { paused = document.hidden; });
+
+  function tick() {
+    if (!paused) {
+      const t = (performance.now() - t0) / 1000;
+      ctx.clearRect(0, 0, W, H);
+      ctx.globalCompositeOperation = "lighter";
+
+      for (let i = 0; i < ribbons.length; i++) {
+        const r = ribbons[i];
+        // Drift: each ribbon scrolls its wave-phase downward over `period` s.
+        // We model this as a vertical offset in [0..1] that loops.
+        const drift = ((t / r.period) + r.phase) % 1;
+
+        // Render the ribbon as a stack of slim horizontal slices, each
+        // displaced by a sine wave whose phase advances with vertical drift.
+        const SLICES = 36; // enough resolution to feel smooth, cheap to draw
+        const sliceH = H / SLICES;
+        const halfW = (r.width * W) / 2;
+        const baseX = r.xFrac * W;
+
+        for (let s = 0; s < SLICES; s++) {
+          const yFrac = s / SLICES;
+          const y = yFrac * H;
+
+          // Sine displacement — uses both yFrac (for vertical wave shape) and
+          // drift (so the wave migrates down over time).
+          const wave = Math.sin((yFrac + drift) * Math.PI * 2 * r.freq + r.phase);
+          const cx = baseX + wave * r.amp * W;
+
+          // Vertical gradient: yellow #f0d72a at top → transparent at bottom.
+          // Per-slice alpha multiplies the gradient by ribbon alpha and a
+          // top-loaded falloff so the ribbon fades as it descends.
+          const fall = 1 - yFrac; // 1 at top, 0 at bottom
+          const a = r.alpha * fall;
+
+          // Horizontal gradient across the ribbon: 0 at edges → a in middle.
+          const grad = ctx.createLinearGradient(cx - halfW, 0, cx + halfW, 0);
+          grad.addColorStop(0,    "rgba(240, 215, 42, 0)");
+          grad.addColorStop(0.5,  `rgba(240, 215, 42, ${a.toFixed(4)})`);
+          grad.addColorStop(1,    "rgba(240, 215, 42, 0)");
+          ctx.fillStyle = grad;
+          ctx.fillRect(cx - halfW, y, halfW * 2, sliceH + 1);
+        }
+      }
+      ctx.globalCompositeOperation = "source-over";
+    }
+    raf = requestAnimationFrame(tick);
+  }
+  raf = requestAnimationFrame(tick);
+
+  return {
+    destroy: () => { cancelAnimationFrame(raf); window.removeEventListener("resize", resize); },
+  };
+}
+
 // ── NOTE RIPPLES ─────────────────────────────────────────────────────────
 // Concentric rings expanding from a click point. Multiple rings can be
 // alive at once (different visitors, different times). Drawn on a 2D canvas.
@@ -358,6 +445,7 @@ export function initMotion(gsap) {
 
   const fieldCanvas = document.querySelector("[data-field]");
   const starsCanvas = document.querySelector("[data-stars]");
+  const auroraCanvas = document.querySelector("[data-aurora]");
   const ripplesCanvas = document.querySelector("[data-ripples]");
   const halo = document.querySelector("[data-cursor-halo]");
   const dot = document.querySelector("[data-cursor-dot]");
@@ -373,10 +461,11 @@ export function initMotion(gsap) {
     l.style.transformOrigin = "center bottom";
   });
 
-  let fieldHandle = null, starsHandle = null, ripplesHandle = null;
+  let fieldHandle = null, starsHandle = null, auroraHandle = null, ripplesHandle = null;
   if (!reduced) {
     fieldHandle = initField(fieldCanvas);
     starsHandle = initStars(starsCanvas);
+    auroraHandle = initAurora(auroraCanvas);
     ripplesHandle = initRipples(ripplesCanvas);
   }
 
@@ -640,6 +729,7 @@ export function initMotion(gsap) {
     clearInterval(pollInterval);
     if (fieldHandle) fieldHandle.destroy();
     if (starsHandle) starsHandle.destroy();
+    if (auroraHandle) auroraHandle.destroy();
     if (ripplesHandle) ripplesHandle.destroy();
     if (es) { try { es.close(); } catch {} }
     gsap.killTweensOf("*");
@@ -650,6 +740,7 @@ export function initMotion(gsap) {
       clearInterval(pollInterval);
       if (fieldHandle) fieldHandle.destroy();
       if (starsHandle) starsHandle.destroy();
+      if (auroraHandle) auroraHandle.destroy();
       if (ripplesHandle) ripplesHandle.destroy();
       if (es) { try { es.close(); } catch {} }
       window.removeEventListener("pagehide", onPageHide);
