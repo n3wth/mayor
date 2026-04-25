@@ -233,6 +233,12 @@ function initStars(canvas, getSoundOn) {
   let paused = false;
   document.addEventListener("visibilitychange", () => { paused = document.hidden; });
 
+  // Per-peer brightness boost. setBrightFor(idx, 1) when a peer's cursor
+  // moves; decays to 0 over ~600ms. Star alpha uses (1 + bright * 1.5)
+  // so the star noticeably blooms while a peer is in motion.
+  const brightness = new Map(); // peerIndex -> { value, lastTs }
+  const BRIGHT_DECAY_MS = 600;
+
   // Shooting stars — short-lived diagonal streaks. Spawned every 8–14s.
   // Each carries a small head and a fading trail (~80px in CSS pixels).
   const shooters = [];
@@ -328,10 +334,22 @@ function initStars(canvas, getSoundOn) {
         const cy = H * (0.5 + 0.22 * Math.cos(t * 0.07 + seed * 1.3));
         const r = (10 + Math.sin(t * 0.5 + seed) * 4) * dpr;
 
-        // Soft yellow glow
+        // Per-peer brightness — decays linearly over BRIGHT_DECAY_MS.
+        let bloom = 1;
+        const b = brightness.get(i);
+        if (b) {
+          const age = now - b.lastTs;
+          const v = age >= BRIGHT_DECAY_MS ? 0 : b.value * (1 - age / BRIGHT_DECAY_MS);
+          if (v <= 0) brightness.delete(i);
+          else bloom = 1 + v * 1.5;
+        }
+
+        // Soft yellow glow — alpha scaled by bloom.
+        const a0 = Math.min(1, 0.55 * bloom);
+        const a1 = Math.min(1, 0.18 * bloom);
         const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, r * 6);
-        grad.addColorStop(0, "rgba(255, 220, 80, 0.55)");
-        grad.addColorStop(0.4, "rgba(255, 200, 60, 0.18)");
+        grad.addColorStop(0, `rgba(255, 220, 80, ${a0.toFixed(3)})`);
+        grad.addColorStop(0.4, `rgba(255, 200, 60, ${a1.toFixed(3)})`);
         grad.addColorStop(1, "rgba(255, 200, 60, 0)");
         ctx.fillStyle = grad;
         ctx.beginPath();
@@ -339,7 +357,8 @@ function initStars(canvas, getSoundOn) {
         ctx.fill();
 
         // Tight bright core
-        ctx.fillStyle = "rgba(255,240,160,0.95)";
+        const ac = Math.min(1, 0.95 * bloom);
+        ctx.fillStyle = `rgba(255,240,160,${ac.toFixed(3)})`;
         ctx.beginPath();
         ctx.arc(cx, cy, 2 * dpr, 0, Math.PI * 2);
         ctx.fill();
@@ -365,6 +384,11 @@ function initStars(canvas, getSoundOn) {
 
   return {
     setCount: (n) => { count = Math.max(1, n | 0); },
+    setBrightFor: (idx, value = 1) => {
+      const i = idx | 0;
+      if (i <= 0) return;
+      brightness.set(i, { value: Math.max(0, Math.min(1, value)), lastTs: performance.now() });
+    },
     destroy: () => { cancelAnimationFrame(raf); window.removeEventListener("resize", resize); },
   };
 }
@@ -577,6 +601,10 @@ let droneStarted = false;
 let droneNodes = null;
 let pluckSynth = null;
 let audioReady = false;
+// Presence instruments — each peer's cursor sings. Soft glissando plucks
+// triggered on remote ptr events, panned by their cursor X.
+let presenceSynth = null;
+let presencePanner = null;
 
 // Pentatonic scale (A minor pentatonic, octaves 3–5). X position picks pitch.
 const PENT = [
@@ -643,6 +671,17 @@ function initAudio() {
     envelope: { attack: 0.02, decay: 0.5, sustain: 0.0, release: 1.0 },
   }).connect(filter);
   leadSynth.volume.value = -14;
+
+  // Presence instrument — soft glissando per peer cursor move. Sine
+  // PolySynth with quick attack and short release, fed through a single
+  // panner so each note can be panned by its peer's cursor X. Volume is
+  // very low so a busy room sounds like distant wind chimes, not chaos.
+  presencePanner = new Tone.Panner(0).connect(reverb);
+  presenceSynth = new Tone.PolySynth(Tone.Synth, {
+    oscillator: { type: "sine" },
+    envelope: { attack: 0.01, decay: 0.2, sustain: 0.0, release: 0.6 },
+  }).connect(presencePanner);
+  presenceSynth.volume.value = -28;
 
   droneNodes = { padA, padE, filter, reverb, lfo };
   audioReady = true;
@@ -718,6 +757,22 @@ function pluck(note, when = 0, vel = 0.7) {
   if (!pluckSynth) return;
   try {
     pluckSynth.triggerAttackRelease(note, "8n", when || Tone.now(), vel);
+  } catch {}
+}
+
+// Soft glissando for a peer cursor at normalized x in [0..1]. Picks a
+// note from the upper pentatonic register (PENT[8..14]) and pans by x.
+function presencePluck(nx) {
+  if (!presenceSynth || !presencePanner || !Tone) return;
+  try {
+    // PENT[8..14] is the airy upper octave region — feels like wind, not
+    // melody. Index range = 7 entries (8..14 inclusive).
+    const i = 8 + Math.max(0, Math.min(6, Math.floor(nx * 7)));
+    const note = PENT[i];
+    // Pan: x=0 → -0.7 (left), x=1 → +0.7 (right).
+    const pan = (nx * 2 - 1) * 0.7;
+    presencePanner.pan.rampTo(pan, 0.05);
+    presenceSynth.triggerAttackRelease(note, "16n", Tone.now(), 0.35);
   } catch {}
 }
 
@@ -864,6 +919,7 @@ export function initMotion(gsap) {
 
     let last = 0;
     let lastTrail = 0;
+    let lastPtrPublish = 0;
     window.addEventListener("pointermove", (e) => {
       lastInteractionAt = Date.now();
       haloX(e.clientX); haloY(e.clientY);
@@ -872,6 +928,22 @@ export function initMotion(gsap) {
       if (trailHandle && now - lastTrail >= 30) {
         lastTrail = now;
         trailHandle.addPoint(e.clientX, e.clientY);
+      }
+      // Publish a ptr event at most every 100ms so the room can hear us
+      // moving without flooding the wire. Skip when reduced motion is on.
+      if (!reduced && now - lastPtrPublish >= 100) {
+        lastPtrPublish = now;
+        fetch(`${SYNC_BASE}/event`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            type: "ptr",
+            x: e.clientX / window.innerWidth,
+            y: e.clientY / window.innerHeight,
+            from: SELF_ID,
+          }),
+          keepalive: true,
+        }).catch(() => {});
       }
       if (now - last < 16) return;
       last = now;
@@ -1458,6 +1530,20 @@ export function initMotion(gsap) {
   setInterval(ensureSeqAudioRunning, 500);
 
   // ── PRESENCE / SYNC via SSE ──
+  // Track peer → star index. The server gives presence count, not stable
+  // IDs, so we allocate indices client-side as new "from" values appear.
+  // Index 0 is self (hidden), indices 1+ are visible stars.
+  const peerIndex = new Map(); // from -> index
+  let nextPeerIdx = 1;
+  function indexFor(from) {
+    if (!from) return 0;
+    let idx = peerIndex.get(from);
+    if (idx === undefined) {
+      idx = nextPeerIdx++;
+      peerIndex.set(from, idx);
+    }
+    return idx;
+  }
   let es = null;
   function connectSync() {
     if (reduced) return;
@@ -1491,6 +1577,15 @@ export function initMotion(gsap) {
             return;
           }
           if (ev.from === SELF_ID) return;
+          // Peer cursor presence — soft glissando + brighten their star.
+          if (ev.type === "ptr") {
+            if (reduced) return;
+            const nx = Math.max(0, Math.min(1, Number(ev.x) || 0.5));
+            const idx = indexFor(ev.from);
+            if (starsHandle) starsHandle.setBrightFor(idx, 1);
+            if (soundOn) presencePluck(nx);
+            return;
+          }
           // Step toggle from a peer
           if (ev.type === "step") {
             applyStepFromPeer(ev.letter, ev.idx | 0, !!ev.on);

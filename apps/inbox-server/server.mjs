@@ -196,6 +196,7 @@ function computeStats() {
 
 const sseClients = new Set(); // each = res
 const ipBuckets = new Map();  // ip -> { tokens, ts }
+const ptrBuckets = new Map(); // ip -> { tokens, ts } — looser limit for "ptr" only
 
 // Server-held current letter colors. Whichever client most recently
 // recolored a letter "wins" for that letter; new visitors get the current
@@ -239,6 +240,21 @@ function takeToken(ip) {
   if (b.tokens < 1) { ipBuckets.set(ip, b); return false; }
   b.tokens -= 1;
   ipBuckets.set(ip, b);
+  return true;
+}
+
+// Looser bucket for pointer-move events. Cursor motion is high-frequency
+// and ambient — we want the room to hear it without flooding either the
+// network or the pacing system. 15 tokens/sec, capped at 15.
+function takePtrToken(ip) {
+  const now = Date.now();
+  const b = ptrBuckets.get(ip) || { tokens: 15, ts: now };
+  const elapsed = (now - b.ts) / 1000;
+  b.tokens = Math.min(15, b.tokens + elapsed * 15);
+  b.ts = now;
+  if (b.tokens < 1) { ptrBuckets.set(ip, b); return false; }
+  b.tokens -= 1;
+  ptrBuckets.set(ip, b);
   return true;
 }
 
@@ -288,7 +304,6 @@ function handleEvents(req, res) {
 
 async function handleEventPublish(req, res) {
   const ip = ipFromReq(req);
-  if (!takeToken(ip)) return j(res, 429, { error: "rate" });
   let raw;
   try {
     raw = await new Promise((resolve, reject) => {
@@ -304,9 +319,16 @@ async function handleEventPublish(req, res) {
   let body;
   try { body = JSON.parse(raw); } catch { return j(res, 400, { error: "bad json" }); }
   // Whitelist allowed event types and clamp coords.
-  const allowed = new Set(["click", "hover", "wave", "tab", "color", "mode", "word", "vibe", "tempo", "confetti", "lamp", "step", "clear"]);
+  const allowed = new Set(["click", "hover", "wave", "tab", "color", "mode", "word", "vibe", "tempo", "confetti", "lamp", "step", "clear", "ptr"]);
   const type = allowed.has(body.type) ? body.type : null;
   if (!type) return j(res, 400, { error: "bad type" });
+  // ptr (cursor presence) gets its own looser bucket; everything else uses
+  // the standard 6/sec bucket so loud one-shot events stay rare.
+  if (type === "ptr") {
+    if (!takePtrToken(ip)) return j(res, 429, { error: "rate" });
+  } else {
+    if (!takeToken(ip)) return j(res, 429, { error: "rate" });
+  }
   // 'from' is a stable per-tab nonce so peers can ignore their own echoes.
   const from = typeof body.from === "string" ? body.from.slice(0, 24) : "";
 
