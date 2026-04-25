@@ -626,6 +626,9 @@ export function initMotion(gsap) {
   // Forward-reference: shooting stars need to know if sound is on. soundOn
   // is declared further down; the getter reads it lazily each spawn.
   let soundOn = false;
+  // Echo: idle-replay state (referenced from pointermove/click handlers below)
+  let lastInteractionAt = Date.now();
+  let lastClick = null;
 
   let fieldHandle = null, starsHandle = null, auroraHandle = null, ripplesHandle = null, trailHandle = null;
   if (!reduced) {
@@ -844,9 +847,7 @@ export function initMotion(gsap) {
     });
   }
 
-  // ── ECHO: idle replay of last click ──
-  let lastInteractionAt = Date.now();
-  let lastClick = null;
+  // ── ECHO: idle replay of last click ── (declarations now at top of initMotion to avoid TDZ)
 
   // ── CLICK: ripple + note. The single most important interaction. ──
   function fireClick(clientX, clientY, isSelf = true) {
