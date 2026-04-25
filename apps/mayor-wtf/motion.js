@@ -426,6 +426,16 @@ function initStars(canvas, getSoundOn, getSingingCount) {
       if (i <= 0) return;
       brightness.set(i, { value: Math.max(0, Math.min(1, value)), lastTs: performance.now() });
     },
+    // Spawn N shooting stars in quick succession. Used by emergence "surge"
+    // moments to make the room rain. Defers the next ambient spawn so the
+    // background shooter rhythm doesn't double-pulse on top of the storm.
+    rainShooters: (n = 5, gapMs = 60) => {
+      const total = Math.max(1, n | 0);
+      for (let i = 0; i < total; i++) {
+        setTimeout(() => spawnShooter(), i * gapMs);
+      }
+      nextShootAt = performance.now() + (8000 + Math.random() * 6000);
+    },
     destroy: () => { cancelAnimationFrame(raf); window.removeEventListener("resize", resize); },
   };
 }
@@ -2358,6 +2368,171 @@ export function initMotion(gsap) {
     }
   }
 
+  // ── EMERGENCE ─────────────────────────────────────────────────────────
+  // Server fires `emergence` events when the room hits collective milestones:
+  //   - quorum  : 4+ visitors connected     → 3-2-1 countdown + synchronized
+  //                                            letter jump + shared chord
+  //   - density : 30%+ grid filled          → portal jump to neon city + 4-bar
+  //                                            bass solo
+  //   - surge   : 30+ events in 10s window  → "SURGE" tagline + screen pulse +
+  //                                            shooting-star rain
+  // Every visitor sees the same moment at the same time. 60s server-side
+  // cooldown per type keeps it rare enough to feel earned.
+
+  // Inject emergence overlay styles once.
+  if (!document.getElementById("emergence-style")) {
+    const s = document.createElement("style");
+    s.id = "emergence-style";
+    s.textContent = [
+      ".emergence-overlay {",
+      "  position: fixed; inset: 0; z-index: 60;",
+      "  display: grid; place-items: center;",
+      "  pointer-events: none;",
+      "  font-family: var(--display, ui-sans-serif, system-ui);",
+      "  font-weight: 900;",
+      "  color: var(--y, #f0d72a);",
+      "  letter-spacing: -0.02em;",
+      "  user-select: none;",
+      "}",
+      ".emergence-count {",
+      "  font-size: clamp(180px, 28vw, 420px);",
+      "  line-height: 1;",
+      "  opacity: 0;",
+      "  text-shadow: 0 0 60px rgba(240,215,42,0.6);",
+      "}",
+      ".emergence-tagline {",
+      "  font-size: clamp(80px, 14vw, 220px);",
+      "  line-height: 1;",
+      "  opacity: 0;",
+      "  text-transform: uppercase;",
+      "  letter-spacing: 0.04em;",
+      "  text-shadow: 0 0 80px rgba(240,215,42,0.7);",
+      "}",
+      ".emergence-pulse {",
+      "  position: fixed; inset: 0; z-index: 6;",
+      "  pointer-events: none;",
+      "  background: radial-gradient(circle at 50% 50%, rgba(240,215,42,0.32) 0%, rgba(240,215,42,0) 70%);",
+      "  opacity: 0;",
+      "}",
+    ].join("\n");
+    document.head.appendChild(s);
+  }
+
+  function emergenceShowText(text, opts = {}) {
+    const cls = opts.cls || "emergence-count";
+    const dur = opts.duration || 0.8;
+    const hold = opts.hold || 0.35;
+    const overlay = document.createElement("div");
+    overlay.className = "emergence-overlay";
+    const node = document.createElement("div");
+    node.className = cls;
+    node.textContent = text;
+    overlay.appendChild(node);
+    document.body.appendChild(overlay);
+    gsap.fromTo(node,
+      { opacity: 0, scale: 0.6 },
+      { opacity: 1, scale: 1, duration: 0.18, ease: "power2.out" }
+    );
+    gsap.to(node, {
+      opacity: 0, scale: 1.3,
+      duration: dur, delay: hold, ease: "power2.in",
+      onComplete: () => { try { overlay.remove(); } catch {} },
+    });
+  }
+
+  function emergenceScreenPulse() {
+    const pulse = document.createElement("div");
+    pulse.className = "emergence-pulse";
+    document.body.appendChild(pulse);
+    gsap.fromTo(pulse,
+      { opacity: 0 },
+      { opacity: 1, duration: 0.18, ease: "power2.out" }
+    );
+    gsap.to(pulse, {
+      opacity: 0, duration: 1.4, delay: 0.18, ease: "power2.in",
+      onComplete: () => { try { pulse.remove(); } catch {} },
+    });
+  }
+
+  // Quorum — 3-2-1 countdown, then on "0" every letter jumps together and a
+  // shared chord rings out. Same chord, same time, every tab.
+  function runQuorum() {
+    if (reduced) return;
+    const startCountdown = (n) => {
+      if (n === 0) {
+        // Synchronized jump — every letter rises in unison, then drops.
+        letters.forEach((l) => {
+          gsap.fromTo(l,
+            { yPercent: 0 },
+            { yPercent: -22, duration: 0.22, ease: "power3.out", overwrite: false }
+          );
+          gsap.to(l, {
+            yPercent: 0, duration: 1.1, ease: "elastic.out(1, 0.55)",
+            delay: 0.22, overwrite: false,
+          });
+        });
+        if (fieldHandle) fieldHandle.triggerPulse(0.5, 0.5);
+        // Shared chord — A minor on the synth that's already in the scene.
+        if (soundOn && Tone) {
+          ensureVoices();
+          try { pluck("A3", 0, 0.7); pluck("C4", 0.02, 0.65); pluck("E4", 0.04, 0.6); pluck("A4", 0.06, 0.6); } catch {}
+        }
+        return;
+      }
+      emergenceShowText(String(n), { cls: "emergence-count", hold: 0.35, duration: 0.55 });
+      if (soundOn && pluckSynth) {
+        // Each tick: a soft tock so the countdown is felt as well as seen.
+        pluck("A4", 0, 0.4);
+      }
+      setTimeout(() => startCountdown(n - 1), 900);
+    };
+    startCountdown(3);
+  }
+
+  // Density — jump the room into neon city (dim 3) and play a 4-bar bass
+  // solo line. The portal switch is already a global broadcast on the
+  // server; we apply locally so all peers transition together regardless
+  // of who triggered it.
+  function runDensity() {
+    if (reduced) return;
+    applyDimension(3);
+    emergenceShowText("dimension shift", { cls: "emergence-tagline", hold: 0.6, duration: 1.0 });
+    if (fieldHandle) fieldHandle.triggerChaos(0.5);
+    // 4-bar bass solo at the current chord's bass note. Steady walk-up.
+    if (soundOn && Tone) {
+      ensureVoices();
+      const ch = (chordOverride != null ? CHORDS[chordOverride] : CHORDS[0]) || CHORDS[0];
+      const root = ch.bass;
+      // Build a pentatonic walk: root, +5, +octave, +5 over 4 bars.
+      const beat = (60 / (Tone.Transport.bpm.value || 96)) * 1; // seconds per quarter
+      const seq = [root, root, ch.scale[2] + "2", ch.scale[2] + "2",
+                   ch.scale[0] + "2", ch.scale[0] + "2", ch.scale[2] + "2", ch.bass];
+      const t0 = Tone.now() + 0.05;
+      seq.forEach((note, i) => {
+        try { voices && voices.bass && voices.bass.triggerAttackRelease(note, "8n", t0 + i * beat * 2, 0.85); } catch {}
+      });
+    }
+  }
+
+  // Surge — the room is electric. Tagline, screen pulse, shooting-star rain.
+  function runSurge() {
+    if (reduced) return;
+    emergenceShowText("surge", { cls: "emergence-tagline", hold: 0.6, duration: 1.0 });
+    emergenceScreenPulse();
+    if (starsHandle && starsHandle.rainShooters) starsHandle.rainShooters(5, 70);
+    if (fieldHandle) fieldHandle.triggerChaos(0.7);
+    if (soundOn && pluckSynth) {
+      // Quick ascending sparkle so the surge has a sonic signature.
+      ["A4", "C5", "E5", "A5", "C6"].forEach((n, i) => pluck(n, i * 0.06, 0.55));
+    }
+  }
+
+  function handleEmergence(kind) {
+    if (kind === "quorum") runQuorum();
+    else if (kind === "density") runDensity();
+    else if (kind === "surge") runSurge();
+  }
+
   // ── PRESENCE / SYNC via SSE ──
   // Track peer → star index. The server gives presence count, not stable
   // IDs, so we allocate indices client-side as new "from" values appear.
@@ -2419,6 +2594,12 @@ export function initMotion(gsap) {
           // Dimension portal sync.
           if (ev.type === "dim") {
             applyDimension(ev.dim | 0);
+            return;
+          }
+          // Emergence — collective moment. Fires for ALL visitors (including
+          // self) at the same wall-clock instant, so the room moves together.
+          if (ev.type === "emergence") {
+            handleEmergence(typeof ev.emergence === "string" ? ev.emergence : "");
             return;
           }
           if (ev.from === SELF_ID) return;

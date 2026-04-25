@@ -292,6 +292,71 @@ function broadcast(event) {
     try { res.write(line); }
     catch { sseClients.delete(res); try { res.end(); } catch {} }
   }
+  // Every public broadcast counts toward the rolling event rate. We exempt
+  // emergence events themselves so a fired moment never re-triggers itself.
+  if (event && event.type !== "emergence" && event.type !== "presence") {
+    recordEventForEmergence();
+  }
+}
+
+// ── EMERGENCE ───────────────────────────────────────────────────────────
+// When the room hits collective milestones, fire a shared moment for every
+// connected visitor. Three triggers, each with a 60s cooldown:
+//   - "quorum"   : 4+ visitors connected
+//   - "density"  : 30%+ of grid (24+ active cells out of 80)
+//   - "surge"    : 30+ peer events broadcast in the last 10 seconds
+const EMERGENCE_COOLDOWN_MS = 60_000;
+const SURGE_WINDOW_MS = 10_000;
+const SURGE_THRESHOLD = 30;
+const QUORUM_MIN_PEERS = 4;
+const DENSITY_MIN_CELLS = 24; // 30% of 5*16 = 80 → 24
+const lastEmergenceAt = { quorum: 0, density: 0, surge: 0 };
+const eventTimestamps = []; // rolling buffer of event ts (ms)
+
+function recordEventForEmergence() {
+  const now = Date.now();
+  eventTimestamps.push(now);
+  // Drop anything older than the surge window so the buffer stays small.
+  const cutoff = now - SURGE_WINDOW_MS;
+  while (eventTimestamps.length && eventTimestamps[0] < cutoff) {
+    eventTimestamps.shift();
+  }
+  // Surge fires reactively when the rate spikes.
+  if (eventTimestamps.length >= SURGE_THRESHOLD) {
+    maybeFireEmergence("surge");
+  }
+}
+
+function gridFillCount() {
+  let n = 0;
+  for (const L of LETTERS) {
+    const row = grid[L];
+    for (let i = 0; i < STEPS; i++) if (row[i]) n++;
+  }
+  return n;
+}
+
+function maybeFireEmergence(type) {
+  const now = Date.now();
+  if (now - (lastEmergenceAt[type] || 0) < EMERGENCE_COOLDOWN_MS) return;
+  lastEmergenceAt[type] = now;
+  // Direct broadcast — bypass recordEventForEmergence() via the type guard
+  // in broadcast(). 'emergence' isn't counted, so no recursion.
+  const line = `data: ${JSON.stringify({ type: "emergence", emergence: type, ts: now })}\n\n`;
+  for (const res of sseClients) {
+    try { res.write(line); }
+    catch { sseClients.delete(res); try { res.end(); } catch {} }
+  }
+  // After surge fires, drain the buffer so we don't immediately re-trigger.
+  if (type === "surge") eventTimestamps.length = 0;
+}
+
+function checkPresenceEmergence() {
+  if (sseClients.size >= QUORUM_MIN_PEERS) maybeFireEmergence("quorum");
+}
+
+function checkDensityEmergence() {
+  if (gridFillCount() >= DENSITY_MIN_CELLS) maybeFireEmergence("density");
 }
 
 function handleEvents(req, res) {
@@ -317,6 +382,8 @@ function handleEvents(req, res) {
   sseClients.add(res);
   // Notify everyone else of the new presence count.
   broadcast({ type: "presence", count: sseClients.size });
+  // Quorum check fires when 4+ visitors are connected.
+  checkPresenceEmergence();
 
   const hb = setInterval(() => {
     try { res.write(": hb\n\n"); }
@@ -445,6 +512,8 @@ async function handleEventPublish(req, res) {
     const on = !!body.on;
     grid[L][idx] = on;
     broadcast({ type: "step", letter: L, idx, on, from, ts: Date.now() });
+    // Density check — only when a cell turns on.
+    if (on) checkDensityEmergence();
     res.setHeader("Access-Control-Allow-Origin", "*");
     return j(res, 202, { ok: true });
   }
