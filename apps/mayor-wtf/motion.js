@@ -590,24 +590,37 @@ function noteForX(nx) {
   return PENT[i];
 }
 
+// Generative composition state.
+// A minor pentatonic over chord progressions: i (Am), VI (F), III (C), VII (G).
+// Each chord lives 8 bars. Visitors entering the room hear the same plan.
+const CHORDS = [
+  { root: "A", scale: ["A", "C", "D", "E", "G"], bass: "A1" },
+  { root: "F", scale: ["F", "A", "C", "D", "E"], bass: "F1" },
+  { root: "C", scale: ["C", "E", "G", "A", "D"], bass: "C2" },
+  { root: "G", scale: ["G", "B", "D", "E", "A"], bass: "G1" },
+];
+let bassSynth = null, leadSynth = null;
+let genLoop = null, bassLoop = null;
+let genActive = false;
+let presenceForGen = 1;
+
 function initAudio() {
   if (audioReady) return true;
   Tone = window.Tone;
   if (!Tone) return false;
 
-  // The drone: two slow detuned sine pads through reverb + filter.
-  // Quiet, room-tone level. Built so it keeps you company without nagging.
+  // Master reverb chain — shared across pads, leads, plucks for a
+  // unified room sound. Wet rises with psy externally.
   const reverb = new Tone.Reverb({ decay: 8, wet: 0.6 }).toDestination();
   const filter = new Tone.Filter(800, "lowpass").connect(reverb);
   filter.Q.value = 0.9;
 
   const padA = new Tone.Oscillator({ type: "sine", frequency: "A2", volume: -22 }).connect(filter);
   const padE = new Tone.Oscillator({ type: "sine", frequency: "E3", volume: -22 }).connect(filter);
-  // A slowly-modulated detune so the pad never sits still.
   const lfo = new Tone.LFO({ frequency: 0.05, min: -8, max: 8 }).start();
   lfo.connect(padE.detune);
 
-  // Pluck — bright marimba-ish. Reads as "a single thought."
+  // Pluck — bright marimba-ish for clicks.
   pluckSynth = new Tone.Synth({
     oscillator: { type: "triangle" },
     envelope: { attack: 0.005, decay: 0.4, sustain: 0.0, release: 1.2 },
@@ -616,9 +629,81 @@ function initAudio() {
   pluckSynth.connect(pluckReverb);
   pluckSynth.volume.value = -10;
 
+  // Bass — soft sine sub with slow attack. Plays root every bar.
+  bassSynth = new Tone.MonoSynth({
+    oscillator: { type: "sine" },
+    envelope: { attack: 0.06, decay: 0.4, sustain: 0.4, release: 1.2 },
+    filterEnvelope: { attack: 0.04, decay: 0.3, sustain: 0.4, release: 1.0, baseFrequency: 120, octaves: 2 },
+  }).connect(reverb);
+  bassSynth.volume.value = -16;
+
+  // Lead — slow attack triangle through filter. Plays the Markov melody.
+  leadSynth = new Tone.PolySynth(Tone.Synth, {
+    oscillator: { type: "triangle" },
+    envelope: { attack: 0.02, decay: 0.5, sustain: 0.0, release: 1.0 },
+  }).connect(filter);
+  leadSynth.volume.value = -14;
+
   droneNodes = { padA, padE, filter, reverb, lfo };
   audioReady = true;
   return true;
+}
+
+// Markov state for the lead — index into the current chord's scale.
+let leadIdx = 2;
+function markovStep() {
+  // 60% step in random direction, 25% leap of 2, 15% rest (return -1).
+  const r = Math.random();
+  if (r < 0.15) return -1;
+  if (r < 0.40) leadIdx += (Math.random() < 0.5 ? -2 : 2);
+  else leadIdx += (Math.random() < 0.5 ? -1 : 1);
+  // Keep in [0, scale.length-1] modulo octave: wrap with reflection.
+  if (leadIdx < 0) leadIdx = -leadIdx;
+  if (leadIdx > 6) leadIdx = 12 - leadIdx;
+  if (leadIdx < 0) leadIdx = 1;
+  return leadIdx;
+}
+
+function startGenerative() {
+  if (!Tone || genActive) return;
+  Tone.Transport.bpm.value = 64;
+  Tone.Transport.start();
+
+  // Master 8-bar chord cycle. Each bar advances the bass note.
+  let bar = 0;
+  let chordIdx = 0;
+  bassLoop = new Tone.Loop((time) => {
+    if (!genActive) return;
+    const ch = CHORDS[chordIdx % CHORDS.length];
+    // Bass on beat 1; only when 2+ visitors present.
+    if (presenceForGen >= 2) bassSynth.triggerAttackRelease(ch.bass, "2n", time, 0.55);
+    bar++;
+    if (bar % 8 === 0) chordIdx++;
+  }, "1m").start(0);
+
+  // Lead Markov melody — eighth-note grid, restful.
+  genLoop = new Tone.Loop((time) => {
+    if (!genActive || presenceForGen < 1) return;
+    const ch = CHORDS[chordIdx % CHORDS.length];
+    const step = markovStep();
+    if (step < 0) return; // rest
+    const scale = ch.scale;
+    const oct = 4 + ((Math.floor(step / scale.length)) | 0);
+    const note = scale[((step % scale.length) + scale.length) % scale.length] + oct;
+    // Velocity falls when many visitors so it doesn't crowd.
+    const v = 0.22 + Math.random() * 0.2;
+    try { leadSynth.triggerAttackRelease(note, "8n", time, v); } catch {}
+  }, "8n").start("4n");
+
+  genActive = true;
+}
+
+function stopGenerative() {
+  if (!genActive) return;
+  if (genLoop) { genLoop.stop(); genLoop.dispose(); genLoop = null; }
+  if (bassLoop) { bassLoop.stop(); bassLoop.dispose(); bassLoop = null; }
+  try { Tone.Transport.stop(); } catch {}
+  genActive = false;
 }
 
 function startDrone() {
@@ -840,11 +925,17 @@ export function initMotion(gsap) {
       soundBtn.classList.toggle("on", soundOn);
     }
     if (soundOn && Tone) {
-      Tone.start().then(() => startDrone()).catch(() => {});
-    } else if (droneNodes && droneStarted) {
-      droneNodes.padA.stop();
-      droneNodes.padE.stop();
-      droneStarted = false;
+      Tone.start().then(() => {
+        startDrone();
+        startGenerative();
+      }).catch(() => {});
+    } else {
+      stopGenerative();
+      if (droneNodes && droneStarted) {
+        droneNodes.padA.stop();
+        droneNodes.padE.stop();
+        droneStarted = false;
+      }
     }
   }
   if (soundBtn) soundBtn.addEventListener("click", () => toggleSound());
@@ -1116,6 +1207,8 @@ export function initMotion(gsap) {
           if (ev.type === "presence") {
             const n = ev.count || 1;
             presenceCount = n;
+            // Generative ensemble layers up with more visitors
+            presenceForGen = n;
             if (presenceEl) {
               presenceEl.textContent = n === 1 ? "alone in the room" : `${n} in the room`;
             }
