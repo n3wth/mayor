@@ -1362,6 +1362,10 @@ export function initMotion(gsap) {
     const nx = clientX / window.innerWidth;
     const ny = clientY / window.innerHeight;
 
+    // Director: log click time so the room's click-rate is observable
+    // by the analyzer. Cheap, capped ring buffer.
+    directorClickAt(performance.now());
+
     // Visual ripple — both on the field shader (background pulse) and as a
     // crisp ring on the foreground.
     if (fieldHandle) fieldHandle.triggerPulse(nx, 1 - ny);
@@ -2335,13 +2339,14 @@ export function initMotion(gsap) {
   const grooveInterval = setInterval(checkGrooveEvolver, 1200);
 
   // ── DIMENSION PORTAL APPLY ─────────────────────────────────────────────
-  let currentDim = 1;
+  // (currentDim is declared above near ensureVoices() to avoid TDZ; we
+  // also remember the prior dim so the Director can briefly portal-jump
+  // to a different dimension and snap back when the scene ends.)
   function applyDimension(n) {
     const idx = Math.max(1, Math.min(9, n | 0));
     const dim = DIMENSIONS[idx - 1];
     if (!dim) return;
     currentDim = idx;
-    activeDim = idx;
     if (fieldHandle && fieldHandle.setColors) {
       fieldHandle.setColors(dim.deep, dim.mid, dim.hi);
     }
@@ -2933,6 +2938,478 @@ export function initMotion(gsap) {
     }
   });
 
+  // ── THE DIRECTOR ───────────────────────────────────────────────────────
+  // An autonomous AI that, every 3-5 minutes, composes a NEW visual+sonic+
+  // conceptual SCENE customized to whatever the room is currently making.
+  // Each scene is a short 8-12 second journey: smooth transition in, hold,
+  // transition out. Every transformation is REVERSIBLE — when the scene
+  // ends, the page returns to baseline.
+  //
+  // The director READS the room (sequencer density, click rate, presence,
+  // sound on/off) to weight its choice — sparse rooms get energetic scenes,
+  // dense rooms get quiet ones, social rooms get scenes that work best
+  // when shared. Per-visitor (no server change), so each tab experiences
+  // its own scene rather than being forced into a global sync.
+  //
+  // A small mono-uppercase tagline at the top says "NOW PLAYING: <SCENE>"
+  // during the held portion, then fades back out.
+
+  // Click ring buffer (last 30s of click timestamps, ms via performance.now())
+  // populated by fireClick — covers self + peer + replay clicks. Wrapped in
+  // try/catch to swallow any TDZ surprises if a click somehow lands during
+  // module init before this `const` runs.
+  const _directorClicks = [];
+  function directorClickAt(t) {
+    try {
+      _directorClicks.push(t);
+      const cutoff = t - 30000;
+      while (_directorClicks.length && _directorClicks[0] < cutoff) {
+        _directorClicks.shift();
+      }
+      if (_directorClicks.length > 200) _directorClicks.shift();
+    } catch {}
+  }
+
+  // Read the room's current state. Used by pickScene to weight choices.
+  function analyzeRoom() {
+    let activeCells = 0;
+    for (const L of SEQ_LETTERS) {
+      for (let i = 0; i < SEQ_STEPS; i++) {
+        if (seqGrid[L][i]) activeCells++;
+      }
+    }
+    const density = activeCells / 80; // 0..1
+    // Click rate: clicks-per-second over the last 10s window.
+    const now = performance.now();
+    let recentClicks = 0;
+    for (let i = _directorClicks.length - 1; i >= 0; i--) {
+      if (_directorClicks[i] >= now - 10000) recentClicks++;
+      else break;
+    }
+    const clickRate = recentClicks / 10;
+    return {
+      density,
+      clickRate,
+      presenceCount: presenceCount | 0,
+      soundOn: !!soundOn,
+      activeCells,
+    };
+  }
+
+  // ── DIRECTOR TAGLINE ────────────────────────────────────────────────────
+  // A subtle mono-uppercase label at the top — the only outward sign that
+  // a scene is in flight. Lives in the same vertical band as the corners
+  // (`.corner.tl` and `.corner.tr`) but centered.
+  if (!document.getElementById("director-style")) {
+    const ds = document.createElement("style");
+    ds.id = "director-style";
+    ds.textContent = `
+      .director-tag {
+        position: absolute;
+        top: clamp(20px, 3vw, 28px);
+        left: 50%;
+        transform: translateX(-50%);
+        z-index: 13;
+        pointer-events: none;
+        font-family: var(--mono);
+        font-size: clamp(10px, 0.95vw, 11.5px);
+        letter-spacing: 0.22em;
+        text-transform: uppercase;
+        color: rgba(255, 255, 255, 0.55);
+        opacity: 0;
+        transition: opacity 600ms ease;
+        white-space: nowrap;
+        text-align: center;
+      }
+      .director-tag.on { opacity: 1; }
+      .director-tag .dot {
+        display: inline-block;
+        width: 5px;
+        height: 5px;
+        border-radius: 50%;
+        background: var(--y);
+        margin-right: 8px;
+        vertical-align: 1px;
+      }
+      .director-bubble {
+        position: absolute;
+        border-radius: 50%;
+        pointer-events: none;
+        background: radial-gradient(circle at 35% 35%, rgba(255,255,255,0.85), rgba(255,255,255,0.15) 60%, rgba(255,255,255,0) 100%);
+        will-change: transform, opacity;
+      }
+    `;
+    document.head.appendChild(ds);
+  }
+  const directorTag = document.createElement("div");
+  directorTag.className = "director-tag";
+  directorTag.setAttribute("aria-live", "polite");
+  directorTag.innerHTML = '<span class="dot"></span><span data-director-name>now playing</span>';
+  // Insert into stage so it sits on the same z-plane as the corners.
+  const stageEl = document.querySelector(".stage");
+  if (stageEl) stageEl.appendChild(directorTag);
+  const directorNameEl = directorTag.querySelector("[data-director-name]");
+  function showDirectorTag(name) {
+    if (!directorNameEl) return;
+    directorNameEl.textContent = `now playing — ${name}`;
+    directorTag.classList.add("on");
+  }
+  function hideDirectorTag() {
+    directorTag.classList.remove("on");
+  }
+
+  // ── SCENE HELPERS ──
+  // Promise-based wait that respects visibilitychange (resumes timing on
+  // return), mostly so a tab-away mid-scene doesn't stall reverts.
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+  // Read Tone.Destination volume safely (could be missing pre-init).
+  function destVol() {
+    return (window.Tone && Tone.Destination && Tone.Destination.volume) || null;
+  }
+
+  // ── SCENES ────────────────────────────────────────────────────────────
+  // Each scene: { name, weight(features) → number, run() → Promise<void> }.
+  // run() owns its own setup + revert. If anything throws, the catch in
+  // runScene() restores baselines (tag hidden, body filter cleared, etc.).
+  const scenes = [
+    // 1) INVERSION — page colors invert + audio briefly louder/wetter so
+    //    the moment feels shared. Smooth in 1.5s, hold 8s, out 1.5s.
+    {
+      name: "inversion",
+      weight: (f) => 0.8 + (f.presenceCount > 1 ? 0.6 : 0) + (f.density > 0.3 ? 0.3 : 0),
+      run: async () => {
+        const body = document.body;
+        const prevFilter = body.style.filter || "";
+        gsap.to(body, { filter: "invert(1) hue-rotate(180deg)", duration: 1.5, ease: "power2.inOut" });
+        const v = destVol();
+        const prevV = v ? v.value : null;
+        if (v && Tone) { try { v.rampTo(prevV + 1.5, 1.2); } catch {} }
+        await sleep(8500);
+        gsap.to(body, { filter: "invert(0) hue-rotate(0deg)", duration: 1.5, ease: "power2.inOut" });
+        if (v && Tone && prevV != null) { try { v.rampTo(prevV, 1.2); } catch {} }
+        await sleep(1600);
+        body.style.filter = prevFilter;
+      },
+    },
+
+    // 2) LIFT TO 3D — hero rotates back as if the page tipped over. Letters
+    //    cast longer shadows. 1.5s tilt in, 8s held, 1.5s back.
+    {
+      name: "lift to 3d",
+      weight: (f) => 0.6 + (f.density < 0.3 ? 0.5 : 0) + (f.clickRate < 0.3 ? 0.3 : 0),
+      run: async () => {
+        const heroEl = document.querySelector(".hero");
+        const midLayer = layers.mid;
+        const prevFilter = midLayer ? midLayer.style.filter : "";
+        gsap.to(heroEl, { rotationX: 35, scale: 0.92, duration: 1.5, ease: "power3.inOut", overwrite: "auto" });
+        if (midLayer) {
+          gsap.to(midLayer, {
+            filter: "drop-shadow(0px 30px 0 rgba(0,0,0,0.45)) drop-shadow(0px 60px 80px rgba(0,0,0,0.7))",
+            duration: 1.5, ease: "power2.inOut", overwrite: "auto",
+          });
+        }
+        await sleep(8000);
+        gsap.to(heroEl, { rotationX: 0, scale: 1, duration: 1.5, ease: "power3.inOut", overwrite: "auto" });
+        if (midLayer) {
+          gsap.to(midLayer, {
+            filter: prevFilter || "",
+            duration: 1.5, ease: "power2.inOut", overwrite: "auto",
+            onComplete: () => { if (midLayer) midLayer.style.filter = prevFilter; },
+          });
+        }
+        await sleep(1600);
+      },
+    },
+
+    // 3) UNDERWATER — palette swims to deep ocean, master low-pass closes
+    //    from 8000 to 600Hz, small bubbles rise. 10s submerged, then resurface.
+    {
+      name: "underwater",
+      weight: (f) => 0.7 + (f.presenceCount === 1 ? 0.5 : 0) + (f.clickRate < 0.4 ? 0.3 : 0),
+      run: async () => {
+        const ocean = DIMENSIONS[1]; // deep ocean
+        if (fieldHandle && fieldHandle.setColors) {
+          // Smoothly tween palette via small steps to avoid the dimension's
+          // voice-rebuild cost. We only swap colors, then restore them.
+          fieldHandle.setColors(ocean.deep, ocean.mid, ocean.hi);
+        }
+        // Master drone filter sweep (down).
+        let prevFreq = null;
+        if (Tone && droneNodes && droneNodes.filter && droneNodes.filter.frequency) {
+          prevFreq = droneNodes.filter.frequency.value;
+          try { droneNodes.filter.frequency.rampTo(600, 1.5); } catch {}
+        }
+        // Bubbles — 14 small floating circles that drift up over 10s.
+        const bubbleHost = document.createElement("div");
+        bubbleHost.style.cssText = "position:absolute;inset:0;z-index:5;pointer-events:none;overflow:hidden;";
+        if (stageEl) stageEl.appendChild(bubbleHost);
+        const NB = 18;
+        for (let i = 0; i < NB; i++) {
+          const b = document.createElement("div");
+          b.className = "director-bubble";
+          const sz = 4 + Math.random() * 12;
+          b.style.width = sz + "px";
+          b.style.height = sz + "px";
+          b.style.left = (Math.random() * 100).toFixed(1) + "%";
+          b.style.bottom = "-4%";
+          b.style.opacity = "0";
+          bubbleHost.appendChild(b);
+          gsap.to(b, {
+            y: -window.innerHeight * (0.85 + Math.random() * 0.25),
+            x: (Math.random() - 0.5) * 60,
+            opacity: 0.6,
+            duration: 6 + Math.random() * 4,
+            delay: Math.random() * 4,
+            ease: "sine.inOut",
+          });
+          gsap.to(b, { opacity: 0, duration: 1.2, delay: 6 + Math.random() * 3, ease: "power2.in" });
+        }
+        await sleep(10000);
+        // Resurface: restore palette to whatever dimension is currently active.
+        // Reading currentDim at end (not start) honors any peer/user dim
+        // change that happened mid-scene.
+        const restoreDim = DIMENSIONS[currentDim - 1] || DIMENSIONS[0];
+        if (fieldHandle && fieldHandle.setColors) {
+          fieldHandle.setColors(restoreDim.deep, restoreDim.mid, restoreDim.hi);
+        }
+        if (Tone && droneNodes && droneNodes.filter && droneNodes.filter.frequency && prevFreq != null) {
+          try { droneNodes.filter.frequency.rampTo(prevFreq, 1.5); } catch {}
+        }
+        await sleep(1600);
+        if (bubbleHost.parentNode) bubbleHost.parentNode.removeChild(bubbleHost);
+      },
+    },
+
+    // 4) TIME CRAWLS — bpm drops to 30 over 1.5s, hero stretches taller as
+    //    if drooping. 9s held. Snaps back.
+    {
+      name: "time crawls",
+      weight: (f) => 0.5 + (f.density > 0.4 ? 0.4 : 0) + (f.clickRate > 0.3 ? 0.3 : 0),
+      run: async () => {
+        let prevBpm = null;
+        if (Tone && Tone.Transport && Tone.Transport.bpm) {
+          prevBpm = Tone.Transport.bpm.value;
+          try { Tone.Transport.bpm.rampTo(30, 1.5); } catch {}
+        }
+        const heroEl = document.querySelector(".hero");
+        gsap.to(heroEl, { scaleY: 1.18, scaleX: 0.96, duration: 1.5, ease: "power2.inOut", overwrite: "auto" });
+        await sleep(9000);
+        gsap.to(heroEl, { scaleY: 1, scaleX: 1, duration: 1.2, ease: "elastic.out(1, 0.6)", overwrite: "auto" });
+        if (Tone && Tone.Transport && Tone.Transport.bpm && prevBpm != null) {
+          try { Tone.Transport.bpm.rampTo(prevBpm, 1.5); } catch {}
+        }
+        await sleep(1600);
+      },
+    },
+
+    // 5) COLOR ESCAPE — letters cycle through the rainbow over 6s, then
+    //    return to yellow. Used when the room is sparse and quiet.
+    {
+      name: "color escape",
+      weight: (f) => 0.5 + (f.activeCells === 0 ? 0.7 : 0) + (f.clickRate < 0.2 ? 0.3 : 0),
+      run: async () => {
+        // 8 hues across the cycle — saturated but readable on black.
+        // Land back on canonical yellow so removing the inline fill is a no-op.
+        const hues = [
+          "#ff5a5f", // red
+          "#ff9f1c", // orange
+          "#f0d72a", // yellow (anchor)
+          "#9fdc4a", // green
+          "#3aa4ff", // blue
+          "#9b6bff", // violet
+          "#ff5cd8", // magenta
+          "#f0d72a", // resolves to yellow
+        ];
+        const STEP_MS = 750;
+        for (const hue of hues) {
+          // GSAP sets the SVG `fill` attribute. We tween to colors directly;
+          // returning to the page's canonical yellow at the end matches the
+          // CSS-variable baseline so the visible state is unchanged after
+          // we drop the inline overrides.
+          gsap.to(letters, {
+            fill: hue,
+            duration: STEP_MS / 1000,
+            ease: "sine.inOut",
+            stagger: 0.04,
+          });
+          await sleep(STEP_MS);
+        }
+        // Drop inline overrides so CSS `fill: var(--y)` resumes ownership.
+        letters.forEach((l) => {
+          l.style.removeProperty("fill");
+          l.removeAttribute("fill");
+        });
+        await sleep(400);
+      },
+    },
+
+    // 6) DUST STORM — chaos uniform pumped, hero shudders, drone bends down.
+    //    8s of unease, then calm.
+    {
+      name: "dust storm",
+      weight: (f) => 0.5 + (f.density === 0 ? 0.5 : 0) + (f.clickRate < 0.3 ? 0.3 : 0),
+      run: async () => {
+        // Hold chaos high by re-triggering each frame for ~8s.
+        let storming = true;
+        const start = performance.now();
+        const stormTick = () => {
+          if (!storming) return;
+          if (fieldHandle) fieldHandle.triggerChaos(0.85);
+          if (performance.now() - start < 8000) requestAnimationFrame(stormTick);
+        };
+        stormTick();
+        const heroEl = document.querySelector(".hero");
+        gsap.to(heroEl, {
+          x: 4, duration: 0.07, repeat: 110, yoyo: true, ease: "power1.inOut", overwrite: "auto",
+        });
+        // Drone tritone bend (down a tritone) for 1.5s.
+        let prevFreq = null;
+        if (Tone && droneNodes && droneNodes.filter && droneNodes.filter.frequency) {
+          prevFreq = droneNodes.filter.frequency.value;
+          try { droneNodes.filter.frequency.rampTo(220, 1.0); } catch {}
+        }
+        await sleep(8000);
+        storming = false;
+        gsap.to(heroEl, { x: 0, duration: 0.5, ease: "power2.out", overwrite: "auto" });
+        if (Tone && droneNodes && droneNodes.filter && droneNodes.filter.frequency && prevFreq != null) {
+          try { droneNodes.filter.frequency.rampTo(prevFreq, 1.5); } catch {}
+        }
+        await sleep(1600);
+      },
+    },
+
+    // 7) WHISPER — master volume drops to ~-30dB, hero softens, hero shrinks
+    //    slightly so the page feels distant. 10s of intimacy, then return.
+    {
+      name: "whisper",
+      weight: (f) => 0.4 + (f.density > 0.5 ? 0.7 : 0) + (f.clickRate > 0.4 ? 0.3 : 0),
+      run: async () => {
+        const v = destVol();
+        let prevV = null;
+        if (v) { prevV = v.value; try { v.rampTo(-30, 1.5); } catch {} }
+        // Hero softens + recedes. Subtle: 1.5px blur + 5% scale-down. Snaps
+        // back at the end without leaving any inline filter behind.
+        const heroEl = document.querySelector(".hero");
+        gsap.to(heroEl, {
+          filter: "blur(1.5px)", scale: 0.95,
+          duration: 1.5, ease: "power2.inOut", overwrite: "auto",
+        });
+        await sleep(10000);
+        if (v && prevV != null) { try { v.rampTo(prevV, 1.5); } catch {} }
+        gsap.to(heroEl, {
+          filter: "blur(0px)", scale: 1,
+          duration: 1.5, ease: "power2.inOut", overwrite: "auto",
+        });
+        await sleep(1600);
+      },
+    },
+
+    // 8) ECHO CHAMBER — install a click-listener wrapper that adds 3 echoes
+    //    at 0.3/0.6/0.9s. 8s window, then uninstall. Visually each click
+    //    ripple becomes 3 ripples, and audibly each click becomes 3 plucks.
+    {
+      name: "echo chamber",
+      weight: (f) => 0.4 + (f.clickRate > 0.4 ? 0.9 : 0) + (f.presenceCount > 1 ? 0.3 : 0),
+      run: async () => {
+        const echoTimers = [];
+        function onEcho(e) {
+          if (e.target && e.target.closest && e.target.closest("a, .sound, button.cell, .gx-star, [data-chord]")) return;
+          const x = e.clientX, y = e.clientY;
+          for (let k = 1; k <= 3; k++) {
+            const t = setTimeout(() => {
+              if (ripplesHandle) ripplesHandle.add(x, y, false, { ghost: true, softness: 1 - k * 0.2 });
+              if (soundOn && pluckSynth) {
+                try { pluck(noteForX(x / window.innerWidth), 0, 0.45 - k * 0.1); } catch {}
+              }
+            }, k * 300);
+            echoTimers.push(t);
+          }
+        }
+        const stage = document.querySelector(".stage");
+        if (stage) stage.addEventListener("click", onEcho, { capture: true });
+        await sleep(8000);
+        if (stage) stage.removeEventListener("click", onEcho, { capture: true });
+        for (const id of echoTimers) clearTimeout(id);
+        await sleep(1000);
+      },
+    },
+  ];
+
+  // ── PICK SCENE ─────────────────────────────────────────────────────────
+  // Weighted sample by suitability. Avoid the immediately-prior scene so
+  // back-to-back repeats are unlikely. Also: if reduced-motion is on or
+  // the tab is hidden, prefer not to run anything (handled in runScene).
+  let _lastSceneIdx = -1;
+  function pickScene(features) {
+    const weights = scenes.map((s, i) => {
+      let w = 0;
+      try { w = Math.max(0.0001, +s.weight(features) || 0.0001); } catch { w = 0.5; }
+      if (i === _lastSceneIdx) w *= 0.25; // discourage repeats
+      return w;
+    });
+    const sum = weights.reduce((a, b) => a + b, 0);
+    let r = Math.random() * sum;
+    for (let i = 0; i < scenes.length; i++) {
+      r -= weights[i];
+      if (r <= 0) return i;
+    }
+    return scenes.length - 1;
+  }
+
+  // ── RUN SCENE ──────────────────────────────────────────────────────────
+  // Schedules the next scene 180-300s out. Skips when hidden, in
+  // reduce-motion, or when the user is mid-paint / mid-recording — those
+  // experiences shouldn't be hijacked.
+  let _scenePending = false;
+  let _sceneTimer = null;
+  function scheduleNextScene() {
+    if (_sceneTimer) clearTimeout(_sceneTimer);
+    const delay = (180 + Math.random() * 120) * 1000;
+    _sceneTimer = setTimeout(runScene, delay);
+  }
+
+  async function runScene() {
+    if (_scenePending) return;
+    if (reduced || document.hidden || painting || ghostState.recording) {
+      scheduleNextScene();
+      return;
+    }
+    const features = analyzeRoom();
+    const idx = pickScene(features);
+    const scene = scenes[idx];
+    if (!scene) { scheduleNextScene(); return; }
+    _lastSceneIdx = idx;
+    _scenePending = true;
+
+    // Tag: fade in just before transition starts. Held through the scene,
+    // fades out as the scene resolves.
+    showDirectorTag(scene.name);
+    try {
+      await scene.run();
+    } catch (err) {
+      // Belt-and-braces revert: clear common transient states so nothing
+      // is left painted into the page if a scene partially fails.
+      try { document.body.style.filter = ""; } catch {}
+      try {
+        const heroEl = document.querySelector(".hero");
+        if (heroEl) gsap.set(heroEl, { rotationX: 0, scaleX: 1, scaleY: 1, x: 0, filter: "blur(0px)" });
+      } catch {}
+      try { letters.forEach((l) => l.style.removeProperty("fill")); } catch {}
+    } finally {
+      hideDirectorTag();
+      _scenePending = false;
+      scheduleNextScene();
+    }
+  }
+
+  // First scene runs sooner than the loop cadence so visitors who land
+  // and stay get a feel for the director within ~90-150s. Subsequent
+  // scenes follow the 180-300s loop.
+  if (!reduced) {
+    _sceneTimer = setTimeout(runScene, (90 + Math.random() * 60) * 1000);
+  }
+
   // ── CLEANUP ──
   const onPageHide = () => {
     clearInterval(pollInterval);
@@ -2944,6 +3421,8 @@ export function initMotion(gsap) {
     if (nightRaf) cancelAnimationFrame(nightRaf);
     if (ghostState.recordTimeout) clearTimeout(ghostState.recordTimeout);
     cancelGhostPlayback();
+    if (_sceneTimer) clearTimeout(_sceneTimer);
+    if (directorTag && directorTag.parentNode) directorTag.parentNode.removeChild(directorTag);
     if (fieldHandle) fieldHandle.destroy();
     if (starsHandle) starsHandle.destroy();
     if (auroraHandle) auroraHandle.destroy();
@@ -2966,6 +3445,8 @@ export function initMotion(gsap) {
       if (nightRaf) cancelAnimationFrame(nightRaf);
       if (ghostState.recordTimeout) clearTimeout(ghostState.recordTimeout);
       cancelGhostPlayback();
+      if (_sceneTimer) clearTimeout(_sceneTimer);
+      if (directorTag && directorTag.parentNode) directorTag.parentNode.removeChild(directorTag);
       if (fieldHandle) fieldHandle.destroy();
       if (starsHandle) starsHandle.destroy();
       if (auroraHandle) auroraHandle.destroy();
