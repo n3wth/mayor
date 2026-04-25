@@ -219,6 +219,31 @@ const LETTERS = ["M", "A", "Y", "O", "R"];
 const STEPS = 16;
 const grid = {};
 for (const L of LETTERS) grid[L] = new Array(STEPS).fill(false);
+
+// ── Time travel: rolling grid history ─────────────────────────────────
+// Every 60s we snapshot the current grid. Visitors can rewind/forward
+// through the last 10 snapshots (≈10 minutes) by pressing arrow keys.
+// History entries are deep-copied so future mutations to `grid` don't
+// retroactively rewrite the past.
+const GRID_HISTORY_CAP = 10;
+const GRID_SNAPSHOT_INTERVAL_MS = 60_000;
+const gridHistory = [];
+// Travel cursor: 0 = present (live grid). Negative values point into
+// gridHistory from the end (-1 = most recent snapshot, -N = oldest).
+// Tracked server-side so the room shares one timeline — rewinding twice
+// in a row walks two minutes back, not the same step twice.
+let gridOffset = 0;
+let liveSnapshot = null; // grid as it was at the moment we left "now"
+function cloneGrid(src) {
+  const out = {};
+  for (const L of LETTERS) out[L] = (src[L] || []).slice();
+  return out;
+}
+function snapshotGrid() {
+  gridHistory.push({ ts: Date.now(), grid: cloneGrid(grid) });
+  while (gridHistory.length > GRID_HISTORY_CAP) gridHistory.shift();
+}
+setInterval(snapshotGrid, GRID_SNAPSHOT_INTERVAL_MS).unref?.();
 const PALETTE = new Set([
   "#f0d72a", "#ffffff", "#ff8a3d", "#7dd3fc", "#a78bfa",
   "#34d399", "#f472b6", "#fb7185",
@@ -324,7 +349,7 @@ async function handleEventPublish(req, res) {
   let body;
   try { body = JSON.parse(raw); } catch { return j(res, 400, { error: "bad json" }); }
   // Whitelist allowed event types and clamp coords.
-  const allowed = new Set(["click", "hover", "wave", "tab", "color", "mode", "word", "vibe", "tempo", "confetti", "lamp", "step", "clear", "ptr", "kick", "chord", "paint", "dim"]);
+  const allowed = new Set(["click", "hover", "wave", "tab", "color", "mode", "word", "vibe", "tempo", "confetti", "lamp", "step", "clear", "ptr", "kick", "chord", "paint", "dim", "rewind", "forward", "snapshot"]);
   const type = allowed.has(body.type) ? body.type : null;
   if (!type) return j(res, 400, { error: "bad type" });
   // ptr (cursor presence) gets its own looser bucket; everything else uses
@@ -432,6 +457,42 @@ async function handleEventPublish(req, res) {
     broadcast({ type: "kick", letter, note, from, ts: Date.now() });
     res.setHeader("Access-Control-Allow-Origin", "*");
     return j(res, 202, { ok: true });
+  }
+
+  if (type === "rewind" || type === "forward") {
+    // Time travel: walk the gridOffset cursor through saved snapshots and
+    // broadcast the resulting grid so every visitor jumps together.
+    // The client sends a per-keypress increment ({offset:-1} or {+1}) and
+    // the server tracks the cumulative position so consecutive presses
+    // step further, not just to the same snapshot.
+    if (!gridHistory.length) return j(res, 409, { error: "no history" });
+    const inc = type === "rewind" ? -1 : 1;
+    const next = Math.max(-gridHistory.length, Math.min(0, gridOffset + inc));
+    if (next === gridOffset) {
+      // At the boundary — nothing to do, but still ack so the client
+      // knows we heard it (the chip on the front-end shows the wall).
+      res.setHeader("Access-Control-Allow-Origin", "*");
+      return j(res, 202, { ok: true, offset: gridOffset, boundary: true });
+    }
+    // Leaving "now" → preserve the live grid so we can come back to it.
+    if (gridOffset === 0 && next < 0) liveSnapshot = cloneGrid(grid);
+    gridOffset = next;
+    const entry = gridOffset === 0
+      ? { ts: Date.now(), grid: liveSnapshot || cloneGrid(grid) }
+      : gridHistory[gridHistory.length + gridOffset];
+    // Apply: replace each row so the broadcast includes a full snapshot.
+    for (const L of LETTERS) grid[L] = (entry.grid[L] || []).slice();
+    if (gridOffset === 0) liveSnapshot = null;
+    broadcast({ type: "grid", grid, from, ts: Date.now() });
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    return j(res, 202, { ok: true, ts: entry.ts, offset: gridOffset });
+  }
+
+  if (type === "snapshot") {
+    // Manual save — push current grid into history immediately.
+    snapshotGrid();
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    return j(res, 202, { ok: true, count: gridHistory.length });
   }
 
   if (type === "clear") {
