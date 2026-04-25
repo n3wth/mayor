@@ -411,6 +411,7 @@ export function initMotion(gsap) {
 
     let last = 0;
     window.addEventListener("pointermove", (e) => {
+      lastInteractionAt = Date.now();
       haloX(e.clientX); haloY(e.clientY);
       dotX(e.clientX); dotY(e.clientY);
       const now = performance.now();
@@ -464,6 +465,11 @@ export function initMotion(gsap) {
     gsap.to(".hero", { scale: 1, duration: 1.6, ease: "elastic.out(1, 0.6)", delay: 0.45 });
   }
 
+  // ── ECHO: idle replay of last click ──
+  // After 12s of stillness, the page softly replays your last click.
+  let lastInteractionAt = Date.now();
+  let lastClick = null;
+
   // ── CLICK: ripple + note. The single most important interaction. ──
   function fireClick(clientX, clientY, isSelf = true) {
     const nx = clientX / window.innerWidth;
@@ -503,6 +509,12 @@ export function initMotion(gsap) {
   // Local click — fan out to peers + render locally.
   function onStageClick(e) {
     if (e.target.closest("a, .sound")) return;
+    lastInteractionAt = Date.now();
+    lastClick = {
+      x: e.clientX,
+      y: e.clientY,
+      note: noteForX(e.clientX / window.innerWidth),
+    };
     fireClick(e.clientX, e.clientY, true);
     fetch(`${SYNC_BASE}/event`, {
       method: "POST",
@@ -592,9 +604,23 @@ export function initMotion(gsap) {
   pollStats();
   const pollInterval = setInterval(pollStats, 5000);
 
+  // ── ECHO IDLE CHECK ──
+  // Every 1s, check if 12s has passed without input. If so, softly replay
+  // the last click — visual ripple at 30% intensity + dim note. Local only.
+  function checkIdle() {
+    if (document.hidden) return;
+    if (!lastClick) return;
+    if (Date.now() - lastInteractionAt <= 12000) return;
+    if (ripplesHandle) ripplesHandle.add(lastClick.x, lastClick.y, false);
+    if (soundOn && pluckSynth) pluck(lastClick.note, 0, 0.3);
+    lastInteractionAt += 12000;
+  }
+  const idleInterval = setInterval(checkIdle, 1000);
+
   // ── CLEANUP ──
   const onPageHide = () => {
     clearInterval(pollInterval);
+    clearInterval(idleInterval);
     if (fieldHandle) fieldHandle.destroy();
     if (starsHandle) starsHandle.destroy();
     if (ripplesHandle) ripplesHandle.destroy();
@@ -605,6 +631,7 @@ export function initMotion(gsap) {
   return {
     destroy: () => {
       clearInterval(pollInterval);
+      clearInterval(idleInterval);
       if (fieldHandle) fieldHandle.destroy();
       if (starsHandle) starsHandle.destroy();
       if (ripplesHandle) ripplesHandle.destroy();
