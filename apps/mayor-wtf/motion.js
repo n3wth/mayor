@@ -9,6 +9,13 @@ const reduceMotion = () =>
 
 const STATS_URL = "/api/stats";
 const POLL_MS = 5000;
+const SYNC_BASE = "https://inbox.mayor.wtf";
+
+// Stable per-tab nonce so SSE peers can ignore their own echoed events.
+const SELF_ID = (() => {
+  const g = (Math.random().toString(36) + Date.now().toString(36)).slice(2, 14);
+  try { return g; } catch { return "anon"; }
+})();
 
 const E = {
   out:    "expo.out",
@@ -431,15 +438,127 @@ export function initMotion(gsap) {
     });
     if (Math.random() < 0.34) delightLetter({ count: 10 });
   }
+  // ── REMOTE PRESENCE: when other visitors interact, mirror it here ──
+  // Server publishes events on /events (SSE). Each event is {type,x,y,from,ts}.
+  // x/y are normalized 0..1 (screen-space). We translate to local pixel coords
+  // and fire a ghost ripple — same animation as a local click but no spark
+  // sound, so it reads as 'someone else is here'.
+  function ghostRipple(nx, ny) {
+    if (reduced) return;
+    const px = nx * window.innerWidth;
+    const py = ny * window.innerHeight;
+    if (fieldHandle) fieldHandle.triggerPulse(nx, 1 - ny);
+    // Faint dot at the spot, fades out — represents 'someone clicked here'.
+    if (sparksLayer) {
+      const ghost = document.createElement("div");
+      ghost.className = "spark";
+      ghost.style.width = "12px";
+      ghost.style.height = "12px";
+      ghost.style.left = `${px}px`;
+      ghost.style.top = `${py}px`;
+      ghost.style.background = "rgba(240,215,42,0.95)";
+      ghost.style.boxShadow = "0 0 28px rgba(240,215,42,0.7)";
+      ghost.style.transform = "translate(-50%,-50%) scale(0.4)";
+      ghost.style.opacity = "0";
+      sparksLayer.appendChild(ghost);
+      gsap.to(ghost, {
+        scale: 1.4, opacity: 1,
+        duration: 0.25,
+        ease: "power3.out",
+      });
+      gsap.to(ghost, {
+        scale: 3.5, opacity: 0,
+        duration: 1.2,
+        delay: 0.18,
+        ease: "power2.out",
+        onComplete: () => ghost.remove(),
+      });
+    }
+    // Letters bow softly as the wave passes (same as click, weaker)
+    letters.forEach((l, i) => {
+      gsap.fromTo(l,
+        { y: 0 },
+        { y: -3, duration: 0.18, ease: "power2.out", delay: i * 0.04 }
+      );
+      gsap.to(l, { y: 0, duration: 0.9, ease: E.bounce, delay: i * 0.04 + 0.18 });
+    });
+  }
+
+  // Update presence chip text when the count changes.
+  let presenceCount = 1;
+  function updatePresence(n) {
+    presenceCount = n || 1;
+    // We render presence inside the existing top-left chip when there are
+    // multiple peers; otherwise the citizens count stays as primary.
+    if (statNum && statLab && presenceCount > 1) {
+      statNum.textContent = String(presenceCount);
+      statLab.textContent = presenceCount === 2 ? "watching · you + 1" : `watching · you + ${presenceCount - 1}`;
+    }
+  }
+
+  // Publish a local event to the server so peers see it.
+  function publishEvent(type, e) {
+    let nx = 0.5, ny = 0.5;
+    if (e && typeof e.clientX === "number") {
+      nx = e.clientX / window.innerWidth;
+      ny = e.clientY / window.innerHeight;
+    }
+    // Don't await — fire and forget.
+    fetch(`${SYNC_BASE}/event`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ type, x: nx, y: ny, from: SELF_ID }),
+      keepalive: true,
+    }).catch(() => {});
+  }
+
+  // Open SSE connection for incoming events.
+  let es = null;
+  function connectSync() {
+    if (reduced) return;
+    try {
+      es = new EventSource(`${SYNC_BASE}/events`);
+      es.onmessage = (msg) => {
+        try {
+          const ev = JSON.parse(msg.data);
+          if (ev.type === "presence") {
+            updatePresence(ev.count);
+            return;
+          }
+          // Ignore our own echoes
+          if (ev.from === SELF_ID) return;
+          if (ev.type === "click" || ev.type === "tab") {
+            ghostRipple(ev.x ?? 0.5, ev.y ?? 0.5);
+          } else if (ev.type === "wave") {
+            // Real email arrival — bigger reaction.
+            ghostRipple(ev.x ?? 0.5, ev.y ?? 0.18);
+            delightLetter({ count: 14 });
+          }
+        } catch {}
+      };
+      es.onerror = () => {
+        // Auto-reconnect with backoff
+        if (es) { try { es.close(); } catch {} es = null; }
+        setTimeout(connectSync, 4000);
+      };
+    } catch {
+      setTimeout(connectSync, 6000);
+    }
+  }
+  connectSync();
+
   if (!reduced) {
     document.querySelector(".stage").addEventListener("click", (e) => {
       if (e.target.closest("a")) return;
       shockwave(e);
+      publishEvent("click", e);
     });
     window.addEventListener("keydown", (e) => {
       if (e.key === " " || e.code === "Space") {
         e.preventDefault();
-        shockwave({ clientX: window.innerWidth / 2, clientY: window.innerHeight / 2 });
+        const fakeE = { clientX: window.innerWidth / 2, clientY: window.innerHeight / 2 };
+        shockwave(fakeE);
+        publishEvent("click", fakeE);
       }
     });
   }
@@ -549,6 +668,7 @@ export function initMotion(gsap) {
     clearInterval(pollInterval);
     if (fieldHandle) fieldHandle.destroy();
     if (streamHandle) streamHandle.destroy();
+    if (es) { try { es.close(); } catch {} }
     gsap.killTweensOf("*");
   };
   window.addEventListener("pagehide", onPageHide);
@@ -557,6 +677,7 @@ export function initMotion(gsap) {
       clearInterval(pollInterval);
       if (fieldHandle) fieldHandle.destroy();
       if (streamHandle) streamHandle.destroy();
+      if (es) { try { es.close(); } catch {} }
       window.removeEventListener("pagehide", onPageHide);
       gsap.killTweensOf("*");
     },

@@ -112,6 +112,10 @@ async function handleInbox(req, res) {
   const path = writeInboundFile(gtPayload);
   invokeMayorRespond(path);
 
+  // Broadcast a public 'wave' so visitors on the landing page see a
+  // synchronized ripple every time a real email arrives.
+  try { broadcast({ type: "wave", x: 0.5, y: 0.18, from: "inbox", ts: Date.now() }); } catch {}
+
   return j(res, 202, { accepted: true, inbound_path: path });
 }
 
@@ -178,12 +182,122 @@ function computeStats() {
   return stats;
 }
 
+// ── Public live presence: SSE fanout ────────────────────────────────────
+// Browsers connect to /events (SSE). When someone clicks/hovers on the
+// landing page, the page POSTs to /event with {type, x, y}. The server
+// fans the event to every connected client, which animates a ripple at
+// (x,y) — so visitors see each other's activity in real time.
+//
+// Constraints (this is fully public):
+//   - Per-IP rate-limited to ~6 events/sec via a simple token bucket.
+//   - Payloads capped at 256 bytes; only x/y/type/from passed through.
+//   - Dropped clients are reaped on send failure.
+//   - Server emits a heartbeat comment every 25s to keep proxies happy.
+
+const sseClients = new Set(); // each = res
+const ipBuckets = new Map();  // ip -> { tokens, ts }
+
+function ipFromReq(req) {
+  const xfwd = (req.headers["x-forwarded-for"] || "").toString().split(",")[0].trim();
+  return xfwd || req.socket?.remoteAddress || "unknown";
+}
+
+function takeToken(ip) {
+  const now = Date.now();
+  const b = ipBuckets.get(ip) || { tokens: 6, ts: now };
+  // Refill at 6 tokens/sec, cap at 6
+  const elapsed = (now - b.ts) / 1000;
+  b.tokens = Math.min(6, b.tokens + elapsed * 6);
+  b.ts = now;
+  if (b.tokens < 1) { ipBuckets.set(ip, b); return false; }
+  b.tokens -= 1;
+  ipBuckets.set(ip, b);
+  return true;
+}
+
+function broadcast(event) {
+  const line = `data: ${JSON.stringify(event)}\n\n`;
+  for (const res of sseClients) {
+    try { res.write(line); }
+    catch { sseClients.delete(res); try { res.end(); } catch {} }
+  }
+}
+
+function handleEvents(req, res) {
+  res.writeHead(200, {
+    "Content-Type": "text/event-stream",
+    "Cache-Control": "no-cache, no-transform",
+    "Connection": "keep-alive",
+    "Access-Control-Allow-Origin": "*",
+    "X-Accel-Buffering": "no",
+  });
+  res.write(`: connected ${new Date().toISOString()}\n\n`);
+  // Tell the new client how many peers are present (including itself).
+  res.write(`data: ${JSON.stringify({ type: "presence", count: sseClients.size + 1 })}\n\n`);
+  sseClients.add(res);
+  // Notify everyone else of the new presence count.
+  broadcast({ type: "presence", count: sseClients.size });
+
+  const hb = setInterval(() => {
+    try { res.write(": hb\n\n"); }
+    catch { clearInterval(hb); sseClients.delete(res); }
+  }, 25000);
+
+  const close = () => {
+    clearInterval(hb);
+    sseClients.delete(res);
+    broadcast({ type: "presence", count: sseClients.size });
+  };
+  req.on("close", close);
+  req.on("error", close);
+}
+
+async function handleEventPublish(req, res) {
+  const ip = ipFromReq(req);
+  if (!takeToken(ip)) return j(res, 429, { error: "rate" });
+  let raw;
+  try {
+    raw = await new Promise((resolve, reject) => {
+      let data = "";
+      req.on("data", (c) => {
+        data += c;
+        if (data.length > 256) reject(new Error("body too large"));
+      });
+      req.on("end", () => resolve(data));
+      req.on("error", reject);
+    });
+  } catch { return j(res, 400, { error: "bad body" }); }
+  let body;
+  try { body = JSON.parse(raw); } catch { return j(res, 400, { error: "bad json" }); }
+  // Whitelist allowed event types and clamp coords.
+  const allowed = new Set(["click", "hover", "wave", "tab"]);
+  const type = allowed.has(body.type) ? body.type : null;
+  if (!type) return j(res, 400, { error: "bad type" });
+  const x = typeof body.x === "number" ? Math.max(0, Math.min(1, body.x)) : 0.5;
+  const y = typeof body.y === "number" ? Math.max(0, Math.min(1, body.y)) : 0.5;
+  // 'from' is a stable per-tab nonce so peers can ignore their own echoes.
+  const from = typeof body.from === "string" ? body.from.slice(0, 24) : "";
+  broadcast({ type, x, y, from, ts: Date.now() });
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  return j(res, 202, { ok: true });
+}
+
 const server = createServer(async (req, res) => {
   try {
     if (req.method === "GET" && req.url === "/health") return j(res, 200, { ok: true });
-    // Public stats — no auth needed; safe metrics only
+    // CORS preflight for /event publish
+    if (req.method === "OPTIONS" && (req.url === "/event" || req.url === "/events")) {
+      res.writeHead(204, {
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+        "Access-Control-Allow-Headers": "content-type",
+        "Access-Control-Max-Age": "86400",
+      });
+      return res.end();
+    }
+    if (req.method === "GET" && req.url === "/events") return handleEvents(req, res);
+    if (req.method === "POST" && req.url === "/event") return handleEventPublish(req, res);
     if (req.method === "GET" && req.url === "/stats") {
-      // Permissive CORS so the front-end can fetch directly if desired
       res.setHeader("Access-Control-Allow-Origin", "*");
       res.setHeader("Cache-Control", "public, max-age=4");
       return j(res, 200, computeStats());
