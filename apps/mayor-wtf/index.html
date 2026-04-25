@@ -30,15 +30,8 @@
   :root {
     --y: #f0d72a;
     --y-warm: #ffd54a;
-    --y-deep: #b89a14;
-    --k: #060606;
+    --k: #050505;
     --w: #ffffff;
-    /* Live-collaborative letter style — driven by motion.js + SSE. */
-    --letter-color-M: #f0d72a;
-    --letter-color-A: #f0d72a;
-    --letter-color-Y: #f0d72a;
-    --letter-color-O: #f0d72a;
-    --letter-color-R: #f0d72a;
     --display: "Display", "Arial Narrow Bold", "Arial Narrow", sans-serif;
     --mono: "Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
     --sans: "Sans", ui-sans-serif, system-ui, -apple-system, sans-serif;
@@ -53,25 +46,23 @@
 
   .stage { position: fixed; inset: 0; overflow: hidden; }
 
-  /* Yellow volumetric mesh — quieter than before, more like soft daylight */
+  /* Volumetric yellow field — the room's atmosphere. */
   .field { position: absolute; inset: 0; z-index: 0; pointer-events: none; }
   .field canvas { display: block; width: 100%; height: 100%; }
 
-  /* Vignette + soft top-down light wash, in front of field but behind hero */
+  /* Soft top vignette so chrome reads. */
   .wash {
     position: absolute; inset: 0; z-index: 1; pointer-events: none;
     background:
       radial-gradient(120% 60% at 50% 0%, rgba(0,0,0,0) 0%, rgba(0,0,0,0.55) 70%, rgba(0,0,0,0.85) 100%),
-      radial-gradient(70% 50% at 50% 50%, rgba(255,213,74,0.0) 30%, rgba(0,0,0,0.45) 100%);
+      radial-gradient(70% 50% at 50% 50%, rgba(0,0,0,0) 30%, rgba(0,0,0,0.45) 100%);
   }
 
-  /* Particle stream sits BEHIND the hero (z-index 2). */
-  .stream { position: absolute; inset: 0; z-index: 2; pointer-events: none; opacity: 0.6; }
-  .stream canvas { display: block; width: 100%; height: 100%; }
+  /* Presence stars — soft drifting points of light, one per visitor. */
+  .stars { position: absolute; inset: 0; z-index: 2; pointer-events: none; }
+  .stars canvas { display: block; width: 100%; height: 100%; }
 
-  /* Hero MAYOR — yellow on black, large, breathing.
-     Real 3D: perspective on the stage, rotateX/Y on the letters group,
-     extrusion via stacked text-shadow + cast shadow that follows rotation. */
+  /* Hero MAYOR — yellow on black, breathing, weighty. */
   .hero {
     position: absolute;
     inset: 0;
@@ -79,7 +70,7 @@
     place-items: center;
     z-index: 4;
     pointer-events: none;
-    perspective: 1400px;
+    perspective: 1600px;
     perspective-origin: 50% 50%;
   }
   .hero .layer {
@@ -87,117 +78,34 @@
     inset: 0;
     display: grid;
     place-items: center;
-    will-change: transform, filter;
+    will-change: transform;
     transform-style: preserve-3d;
   }
-  /* Per-letter 3D — letters react to cursor like sculpted slabs. */
-  .ml {
-    transform-box: fill-box;
-    transform-origin: 50% 60%;
-    will-change: transform;
-  }
-  /* Faux extrusion: two cheap drop-shadows. 9-stack was killing GPU. */
-  .hero .layer.mid svg {
-    filter:
-      drop-shadow(0px 4px 0 rgba(0,0,0,0.30))
-      drop-shadow(0px 22px 28px rgba(0,0,0,0.45));
-  }
-  .hero svg {
-    width: min(96vw, 1500px);
-    height: auto;
-    overflow: visible;
-  }
-  .hero .layer text, .hero .layer .ml {
+  .ml { transform-box: fill-box; transform-origin: 50% 60%; will-change: transform; cursor: pointer; pointer-events: auto; }
+  .hero svg { width: min(96vw, 1500px); height: auto; overflow: visible; }
+  .hero .layer text {
     font-family: var(--display);
     font-weight: 900;
     text-anchor: middle;
     letter-spacing: -0.04em;
-    transition: fill 1.2s cubic-bezier(.2,.8,.2,1);
   }
-  /* Solid fill (default) per letter */
-  .hero .layer.mid .ml[data-mode="solid"][data-letter="M"]   { fill: var(--letter-color-M); }
-  .hero .layer.mid .ml[data-mode="solid"][data-letter="A"]   { fill: var(--letter-color-A); }
-  .hero .layer.mid .ml[data-mode="solid"][data-letter="Y"]   { fill: var(--letter-color-Y); }
-  .hero .layer.mid .ml[data-mode="solid"][data-letter="O"]   { fill: var(--letter-color-O); }
-  .hero .layer.mid .ml[data-mode="solid"][data-letter="R"]   { fill: var(--letter-color-R); }
-  /* Outline: hollow letter, just the contour */
-  .hero .layer.mid .ml[data-mode="outline"]                  { fill: transparent; stroke-width: 4; paint-order: stroke; }
-  .hero .layer.mid .ml[data-mode="outline"][data-letter="M"] { stroke: var(--letter-color-M); }
-  .hero .layer.mid .ml[data-mode="outline"][data-letter="A"] { stroke: var(--letter-color-A); }
-  .hero .layer.mid .ml[data-mode="outline"][data-letter="Y"] { stroke: var(--letter-color-Y); }
-  .hero .layer.mid .ml[data-mode="outline"][data-letter="O"] { stroke: var(--letter-color-O); }
-  .hero .layer.mid .ml[data-mode="outline"][data-letter="R"] { stroke: var(--letter-color-R); }
-  /* Dotted: pattern-filled */
-  .hero .layer.mid .ml[data-mode="dotted"][data-letter="M"]  { fill: url(#pat-dotted-M); }
-  .hero .layer.mid .ml[data-mode="dotted"][data-letter="A"]  { fill: url(#pat-dotted-A); }
-  .hero .layer.mid .ml[data-mode="dotted"][data-letter="Y"]  { fill: url(#pat-dotted-Y); }
-  .hero .layer.mid .ml[data-mode="dotted"][data-letter="O"]  { fill: url(#pat-dotted-O); }
-  .hero .layer.mid .ml[data-mode="dotted"][data-letter="R"]  { fill: url(#pat-dotted-R); }
-  /* Stripes: diagonal hatch */
-  .hero .layer.mid .ml[data-mode="stripes"][data-letter="M"] { fill: url(#pat-stripes-M); }
-  .hero .layer.mid .ml[data-mode="stripes"][data-letter="A"] { fill: url(#pat-stripes-A); }
-  .hero .layer.mid .ml[data-mode="stripes"][data-letter="Y"] { fill: url(#pat-stripes-Y); }
-  .hero .layer.mid .ml[data-mode="stripes"][data-letter="O"] { fill: url(#pat-stripes-O); }
-  .hero .layer.mid .ml[data-mode="stripes"][data-letter="R"] { fill: url(#pat-stripes-R); }
-  .ml { cursor: pointer; pointer-events: auto; }
-  .ml.selected { outline: 2px dashed rgba(255,255,255,0.4); outline-offset: 8px; }
-
-  /* Soft halo behind */
   .hero .layer.back text {
     fill: var(--y-warm);
-    filter: blur(28px);
-    opacity: 0.32;
+    filter: blur(40px);
+    opacity: 0.45;
   }
-  /* Body fill is controlled live via --letter-color (see above) */
-  /* Crisp specular highlight pass — clipped to letters via SVG mask */
-  .hero .layer.shine {
-    mix-blend-mode: screen;
-    opacity: 0.9;
-  }
-
-  /* Tagline beneath title — small, refined */
-  .tagline {
-    position: absolute;
-    left: 50%;
-    bottom: clamp(140px, 20vh, 200px);
-    transform: translateX(-50%);
-    z-index: 5;
-    pointer-events: none;
-    font-family: var(--mono);
-    font-size: clamp(10px, 0.95vw, 11.5px);
-    letter-spacing: 0.34em;
-    text-transform: uppercase;
-    color: rgba(255,255,255,0.4);
-    text-align: center;
-    white-space: nowrap;
-  }
-  .tagline .dot {
-    display: inline-block;
-    width: 5px; height: 5px;
-    border-radius: 50%;
-    background: var(--y);
-    box-shadow: 0 0 10px var(--y);
-    margin: 0 14px;
-    vertical-align: 2px;
-    animation: blink 3.2s ease-in-out infinite;
-  }
-  @keyframes blink {
-    0%, 100% { opacity: 1; }
-    50% { opacity: 0.3; }
+  .hero .layer.mid text { fill: var(--y); }
+  .hero .layer.mid svg {
+    filter:
+      drop-shadow(0px 4px 0 rgba(0,0,0,0.35))
+      drop-shadow(0px 26px 36px rgba(0,0,0,0.55));
   }
 
-  /* Sparks layer — restrained, used only on rare real events */
-  .sparks { position: absolute; inset: 0; pointer-events: none; z-index: 7; overflow: hidden; }
-  .spark {
-    position: absolute;
-    width: 4px; height: 4px;
-    border-radius: 50%;
-    will-change: transform, opacity;
-    pointer-events: none;
-    mix-blend-mode: screen;
-  }
+  /* Note ripples (synced) — concentric expanding rings drawn on click anywhere. */
+  .ripples { position: absolute; inset: 0; z-index: 3; pointer-events: none; }
+  .ripples canvas { display: block; width: 100%; height: 100%; }
 
-  /* Custom cursor — refined */
+  /* Cursor */
   .cursor-halo, .cursor-dot {
     position: fixed;
     top: 0; left: 0;
@@ -207,33 +115,63 @@
     will-change: transform;
   }
   .cursor-halo {
-    width: 56px; height: 56px;
-    margin: -28px 0 0 -28px;
+    width: 60px; height: 60px;
+    margin: -30px 0 0 -30px;
     border-radius: 50%;
-    background: radial-gradient(circle, rgba(240,215,42,0.28) 0%, rgba(240,215,42,0) 70%);
+    background: radial-gradient(circle, rgba(240,215,42,0.32) 0%, rgba(240,215,42,0) 70%);
     mix-blend-mode: screen;
   }
   .cursor-dot {
     width: 4px; height: 4px;
     margin: -2px 0 0 -2px;
     border-radius: 50%;
-    background: rgba(255,255,255,0.9);
+    background: rgba(255,255,255,0.95);
   }
 
-  /* Bottom CTA — minimal, beautiful */
-  .cta-wrap {
+  /* Two corners only — domain & link. Implicit. */
+  .corner {
+    position: absolute;
+    z-index: 12;
+    pointer-events: auto;
+    font-family: var(--mono);
+    font-size: clamp(10px, 0.95vw, 11.5px);
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: rgba(255,255,255,0.55);
+  }
+  .corner.tl { top: clamp(20px, 3vw, 28px); left: clamp(22px, 3vw, 32px); }
+  .corner.tr { top: clamp(20px, 3vw, 28px); right: clamp(22px, 3vw, 32px); }
+  .corner.bl { bottom: clamp(22px, 3vw, 30px); left: clamp(22px, 3vw, 32px); }
+  .corner.br { bottom: clamp(22px, 3vw, 30px); right: clamp(22px, 3vw, 32px); }
+  .corner a { color: rgba(255,255,255,0.65); text-decoration: none; transition: color .25s ease; }
+  .corner a:hover { color: var(--w); }
+  .corner .live {
+    display: inline-block;
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: var(--y);
+    box-shadow: 0 0 8px var(--y);
+    margin-right: 8px;
+    vertical-align: 0;
+    animation: blink 2.6s ease-in-out infinite;
+  }
+  @keyframes blink {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.3; }
+  }
+
+  /* CTA — the only call to action. Quiet, in glass. */
+  .cta {
     position: absolute;
     left: 50%;
-    bottom: clamp(36px, 6vh, 70px);
+    bottom: clamp(38px, 6vh, 64px);
     transform: translateX(-50%);
     z-index: 12;
     pointer-events: auto;
-  }
-  .cta {
     display: inline-flex;
     align-items: center;
     gap: 14px;
-    padding: 14px 26px;
+    padding: 13px 24px;
     font-family: var(--sans);
     font-weight: 600;
     font-size: clamp(13px, 1.1vw, 15px);
@@ -241,323 +179,43 @@
     text-decoration: none;
     border: 1px solid rgba(255,255,255,0.14);
     border-radius: 999px;
-    background: linear-gradient(180deg, rgba(255,255,255,0.04) 0%, rgba(255,255,255,0) 60%), rgba(8,8,10,0.45);
+    background: rgba(8,8,10,0.45);
     -webkit-backdrop-filter: blur(12px);
     backdrop-filter: blur(12px);
-    box-shadow:
-      inset 0 1px 0 rgba(255,255,255,0.08),
-      inset 0 -1px 0 rgba(0,0,0,0.6),
-      0 30px 70px -30px rgba(0,0,0,0.9);
+    box-shadow: 0 30px 60px -30px rgba(0,0,0,0.85);
     transition: transform .5s cubic-bezier(.2,.8,.2,1), border-color .4s ease;
   }
-  .cta:hover {
-    transform: translateY(-1px);
-    border-color: rgba(240,215,42,0.5);
-  }
+  .cta:hover { transform: translateX(-50%) translateY(-1px); border-color: rgba(240,215,42,0.5); }
   .cta .pin {
     width: 7px; height: 7px;
     border-radius: 50%;
     background: var(--y);
     box-shadow: 0 0 14px var(--y);
   }
-  .cta .arrow {
-    margin-left: 4px;
-    opacity: 0.55;
-    transition: transform .4s cubic-bezier(.2,.8,.2,1), opacity .3s ease;
-  }
-  .cta:hover .arrow { transform: translateX(4px); opacity: 1; }
 
-  /* Shared toolbox — click a letter, then a color or mode. Everyone sees it. */
-  .toolbox {
+  /* Sound chip — one tiny invitation, bottom-right. */
+  .sound {
     position: absolute;
-    left: 50%;
-    bottom: clamp(98px, 14vh, 150px);
-    transform: translateX(-50%);
-    z-index: 13;
-    pointer-events: auto;
-    display: flex;
-    gap: 8px;
-    align-items: center;
-  }
-  .pill {
-    display: flex;
-    gap: 8px;
-    align-items: center;
-    padding: 8px 12px;
-    border-radius: 999px;
-    background: rgba(8,8,10,0.45);
-    -webkit-backdrop-filter: blur(10px);
-    backdrop-filter: blur(10px);
-    border: 1px solid rgba(255,255,255,0.08);
-  }
-  .pill button {
-    background: transparent;
-    border: 1px solid rgba(255,255,255,0.12);
-    cursor: pointer;
-    padding: 0;
-    transition: transform .25s cubic-bezier(.2,.8,.2,1), box-shadow .25s ease, border-color .25s ease;
-  }
-  .pill button:hover { transform: scale(1.12); }
-  .pill button.active { box-shadow: 0 0 0 2px rgba(255,255,255,0.95); }
-  /* Color swatches */
-  .palette button {
-    width: 18px; height: 18px;
-    border-radius: 50%;
-  }
-  /* Mode swatches — square, with iconographic preview */
-  .modes button {
-    width: 22px; height: 22px;
-    border-radius: 4px;
-    background: rgba(255,255,255,0.04);
-    color: rgba(255,255,255,0.85);
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-  }
-  .modes button svg { width: 14px; height: 14px; }
-  /* Language pills — text labels (en/es/fr/...) */
-  .langs button {
-    width: auto; height: 22px;
-    border-radius: 4px;
-    padding: 0 8px;
-    background: rgba(255,255,255,0.04);
-    color: rgba(255,255,255,0.7);
-    font-family: var(--mono);
-    font-size: 10px;
-    letter-spacing: 0.18em;
-    text-transform: uppercase;
-    line-height: 1;
-  }
-  .langs button.active { background: rgba(255,255,255,0.95); color: var(--k); border-color: rgba(255,255,255,0.95); }
-  /* Vibe pills — small colored dots (mood swatches that aren't yellow!). */
-  .vibes button {
-    width: 18px; height: 18px;
-    border-radius: 50%;
-  }
-  /* Tempo readout + slider */
-  .tempo {
-    padding: 4px 10px;
-    border-radius: 999px;
-    border: 1px solid rgba(255,255,255,0.10);
-    background: rgba(8,8,10,0.45);
-    -webkit-backdrop-filter: blur(10px);
-    backdrop-filter: blur(10px);
-    display: inline-flex;
-    gap: 8px;
-    align-items: center;
-    font-family: var(--mono);
-    font-size: 10.5px;
-    letter-spacing: 0.16em;
-    text-transform: uppercase;
-    color: rgba(255,255,255,0.7);
-  }
-  .tempo input[type=range] {
-    width: 80px;
-    accent-color: var(--y);
-    background: transparent;
-  }
-  .tempo .bpm { font-variant-numeric: tabular-nums; color: var(--w); min-width: 28px; }
-  /* Confetti button */
-  .confetti-btn {
-    padding: 0 12px;
-    height: 30px;
-    border: 1px solid rgba(255,255,255,0.14);
-    border-radius: 999px;
-    background: rgba(8,8,10,0.45);
-    -webkit-backdrop-filter: blur(10px);
-    backdrop-filter: blur(10px);
-    color: var(--w);
-    font-family: var(--mono);
-    font-size: 10.5px;
-    letter-spacing: 0.16em;
-    text-transform: uppercase;
-    cursor: pointer;
-    transition: transform .25s, border-color .25s, background .25s;
-  }
-  .confetti-btn:hover { transform: scale(1.05); border-color: rgba(255,255,255,0.5); }
-  .confetti-btn:active { transform: scale(0.96); }
-
-  /* Toolbox layout — wrap nicely on small screens */
-  .toolbox { flex-wrap: wrap; justify-content: center; max-width: 92vw; gap: 8px; }
-
-  /* ── STEP SEQUENCER GRID ─────────────────────────────────────── */
-  /* 5 rows (M/A/Y/O/R) × 16 steps. Tiny squares; toggleable. Glassy.
-     Sits centered, just above the toolbox. */
-  .seq {
-    position: absolute;
-    left: 50%;
-    bottom: clamp(168px, 24vh, 240px);
-    transform: translateX(-50%);
-    z-index: 13;
-    pointer-events: auto;
-    display: grid;
-    grid-template-columns: 24px repeat(16, 1fr);
-    gap: 4px;
-    padding: 12px 14px;
-    border-radius: 14px;
-    background: rgba(8,8,10,0.45);
-    -webkit-backdrop-filter: blur(10px);
-    backdrop-filter: blur(10px);
-    border: 1px solid rgba(255,255,255,0.08);
-    box-shadow:
-      inset 0 1px 0 rgba(255,255,255,0.06),
-      0 30px 60px -30px rgba(0,0,0,0.85);
-  }
-  .seq.hidden { opacity: 0; pointer-events: none; transform: translate(-50%, 12px); transition: opacity .4s, transform .4s; }
-  .seq .row-label {
-    font-family: var(--mono);
-    font-size: 10px;
-    letter-spacing: 0.16em;
-    text-transform: uppercase;
-    color: rgba(255,255,255,0.55);
-    align-self: center;
-    text-align: center;
-  }
-  .seq button {
-    width: clamp(14px, 1.6vw, 22px);
-    height: clamp(14px, 1.6vw, 22px);
-    border-radius: 4px;
-    border: 1px solid rgba(255,255,255,0.10);
-    background: rgba(255,255,255,0.03);
-    cursor: pointer;
-    padding: 0;
-    transition: background .12s ease, transform .12s ease, box-shadow .12s ease;
-  }
-  .seq button:hover { background: rgba(255,255,255,0.10); }
-  .seq button.on {
-    background: var(--y);
-    border-color: var(--y);
-    box-shadow: 0 0 12px rgba(240,215,42,0.55);
-  }
-  .seq button.playing { transform: scale(1.18); box-shadow: 0 0 18px rgba(255,255,255,0.4); }
-  /* Beat indicator strip above the grid */
-  .seq .head {
-    grid-column: 2 / -1;
-    display: grid;
-    grid-template-columns: repeat(16, 1fr);
-    gap: 4px;
-    margin-bottom: 2px;
-    grid-row: 1;
-  }
-  .seq .head span {
-    height: 3px;
-    border-radius: 2px;
-    background: rgba(255,255,255,0.06);
-  }
-  .seq .head span.beat { background: rgba(255,255,255,0.20); }
-  .seq .head span.now { background: var(--y); box-shadow: 0 0 8px var(--y); }
-
-  /* Dimension indicator — top-center pill, shows current dimension 1-6 */
-  .dim {
-    position: absolute;
-    top: clamp(22px, 3vw, 32px);
-    left: 50%;
-    transform: translateX(-50%);
+    bottom: clamp(38px, 6vh, 64px);
+    right: clamp(22px, 3vw, 32px);
     z-index: 12;
     pointer-events: auto;
-    padding: 6px 14px;
+    padding: 8px 14px;
     border-radius: 999px;
-    background: rgba(8,8,10,0.45);
-    -webkit-backdrop-filter: blur(10px);
-    backdrop-filter: blur(10px);
     border: 1px solid rgba(255,255,255,0.10);
-    font-family: var(--mono);
-    font-size: 10.5px;
-    letter-spacing: 0.18em;
-    text-transform: uppercase;
-    color: rgba(255,255,255,0.85);
-    display: inline-flex;
-    gap: 10px;
-    align-items: center;
-  }
-  .dim .key {
-    background: rgba(255,255,255,0.08);
-    border: 1px solid rgba(255,255,255,0.12);
-    border-radius: 4px;
-    padding: 1px 6px;
+    background: rgba(8,8,10,0.45);
+    -webkit-backdrop-filter: blur(12px);
+    backdrop-filter: blur(12px);
     color: rgba(255,255,255,0.65);
-    cursor: pointer;
     font-family: var(--mono);
-    font-size: 10px;
+    font-size: 10.5px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    cursor: pointer;
+    transition: color .3s ease, border-color .3s ease;
   }
-  .dim .key.active { background: var(--y); color: var(--k); border-color: var(--y); }
-  .dim .label { opacity: 0.7; }
-
-  /* Confetti particle (different from existing .spark — bigger, slower, more chaotic) */
-  .confetti {
-    position: absolute;
-    width: 10px; height: 10px;
-    will-change: transform, opacity;
-    pointer-events: none;
-    border-radius: 2px;
-  }
-
-  @media (max-width: 700px) {
-    .toolbox { gap: 6px; max-width: 96vw; }
-    .pill { padding: 6px 10px; gap: 6px; }
-    .palette button { width: 16px; height: 16px; }
-    .modes button { width: 20px; height: 20px; }
-    .vibes button { width: 16px; height: 16px; }
-    .tempo input[type=range] { width: 60px; }
-    .langs button { font-size: 9px; padding: 0 6px; height: 20px; }
-  }
-
-  /* Top corners */
-  .top {
-    position: absolute;
-    top: clamp(22px, 3vw, 30px);
-    z-index: 12;
-    pointer-events: auto;
-    font-family: var(--sans);
-    font-size: clamp(11px, 0.95vw, 12.5px);
-  }
-  .top.l { left: clamp(22px, 3vw, 32px); }
-  .top.r { right: clamp(22px, 3vw, 32px); }
-
-  .chip {
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-    padding: 7px 14px;
-    border: 1px solid rgba(255,255,255,0.10);
-    border-radius: 999px;
-    background: rgba(8,8,10,0.42);
-    -webkit-backdrop-filter: blur(10px);
-    backdrop-filter: blur(10px);
-    color: rgba(255,255,255,0.75);
-    text-decoration: none;
-    transition: border-color .35s ease, color .35s ease;
-  }
-  .chip:hover { color: var(--w); border-color: rgba(255,255,255,0.32); }
-  .chip .live {
-    width: 6px; height: 6px;
-    border-radius: 50%;
-    background: var(--y);
-    box-shadow: 0 0 8px var(--y);
-    animation: blink 2.6s ease-in-out infinite;
-  }
-  .chip .num { font-variant-numeric: tabular-nums; opacity: 0.95; }
-  .chip .lab { opacity: 0.55; font-weight: 500; }
-
-  /* Lamp on = light mode for everyone */
-  html.lamp-on { background: #fafafa; }
-  html.lamp-on body { background: #fafafa; color: #111; }
-  html.lamp-on .field { opacity: 0.25; }
-  html.lamp-on .wash { background:
-    radial-gradient(120% 60% at 50% 0%, rgba(255,255,255,0) 0%, rgba(0,0,0,0.06) 70%, rgba(0,0,0,0.18) 100%),
-    radial-gradient(70% 50% at 50% 50%, rgba(255,255,255,0) 30%, rgba(0,0,0,0.05) 100%);
-  }
-  html.lamp-on .stream { opacity: 0.18; }
-  html.lamp-on .chip, html.lamp-on .cta, html.lamp-on .palette, html.lamp-on .pill, html.lamp-on .tempo, html.lamp-on .confetti-btn {
-    background: rgba(255,255,255,0.6);
-    border-color: rgba(0,0,0,0.12);
-    color: #111;
-  }
-  html.lamp-on .top.r .chip a, html.lamp-on .chip { color: #111; }
-  html.lamp-on .cta { color: #111; }
-  html.lamp-on .grain { opacity: 0.04; }
-  html.lamp-on .cursor-halo { background: radial-gradient(circle, rgba(0,0,0,0.18) 0%, rgba(0,0,0,0) 70%); }
-  html.lamp-on .cursor-dot { background: #111; }
+  .sound:hover { color: var(--w); border-color: rgba(255,255,255,0.32); }
+  .sound.on { color: var(--y); border-color: rgba(240,215,42,0.45); }
 
   @media (prefers-reduced-motion: reduce) {
     * { animation: none !important; transition: none !important; }
@@ -567,7 +225,7 @@
   @media (max-width: 700px) {
     body { cursor: auto; }
     .cursor-halo, .cursor-dot { display: none; }
-    .tagline { font-size: 9px; letter-spacing: 0.28em; bottom: 130px; }
+    .corner.bl, .corner.br { display: none; }
   }
 </style>
 </head>
@@ -575,235 +233,49 @@
 
 <div class="stage">
 
-  <!-- Volumetric yellow background -->
-  <div class="field" aria-hidden="true">
-    <canvas data-field></canvas>
-  </div>
-
-  <!-- Soft top-vignette and center darkening so type pops -->
+  <!-- Atmosphere -->
+  <div class="field" aria-hidden="true"><canvas data-field></canvas></div>
   <div class="wash" aria-hidden="true"></div>
 
-  <!-- Particle stream behind hero -->
-  <div class="stream" aria-hidden="true">
-    <canvas data-stream></canvas>
-  </div>
+  <!-- Presence stars -->
+  <div class="stars" aria-hidden="true"><canvas data-stars></canvas></div>
+
+  <!-- Note ripples -->
+  <div class="ripples" aria-hidden="true"><canvas data-ripples></canvas></div>
 
   <!-- Hero -->
   <div class="hero" aria-label="Mayor">
-    <!-- Halo (text content rebuilt by motion.js on word change) -->
     <div class="layer back" data-layer="back">
       <svg viewBox="0 0 1500 480" preserveAspectRatio="xMidYMid meet">
-        <text data-back-text x="750" y="380" font-size="440" letter-spacing="-18">MAYOR</text>
+        <text x="750" y="380" font-size="440" letter-spacing="-18">MAYOR</text>
       </svg>
     </div>
-
-    <!-- Solid body, individually addressable letters -->
     <div class="layer mid" data-layer="mid">
       <svg viewBox="0 0 1500 480" preserveAspectRatio="xMidYMid meet">
-        <defs>
-          <!-- Per-letter pattern fills — one of each kind per letter so
-               the pattern color can track that letter's color independently. -->
-          <pattern id="pat-dotted-M" patternUnits="userSpaceOnUse" width="22" height="22">
-            <circle cx="11" cy="11" r="3.2" fill="var(--letter-color-M)"/>
-          </pattern>
-          <pattern id="pat-dotted-A" patternUnits="userSpaceOnUse" width="22" height="22">
-            <circle cx="11" cy="11" r="3.2" fill="var(--letter-color-A)"/>
-          </pattern>
-          <pattern id="pat-dotted-Y" patternUnits="userSpaceOnUse" width="22" height="22">
-            <circle cx="11" cy="11" r="3.2" fill="var(--letter-color-Y)"/>
-          </pattern>
-          <pattern id="pat-dotted-O" patternUnits="userSpaceOnUse" width="22" height="22">
-            <circle cx="11" cy="11" r="3.2" fill="var(--letter-color-O)"/>
-          </pattern>
-          <pattern id="pat-dotted-R" patternUnits="userSpaceOnUse" width="22" height="22">
-            <circle cx="11" cy="11" r="3.2" fill="var(--letter-color-R)"/>
-          </pattern>
-          <pattern id="pat-stripes-M" patternUnits="userSpaceOnUse" width="14" height="14" patternTransform="rotate(-30)">
-            <rect x="0" y="0" width="6" height="14" fill="var(--letter-color-M)"/>
-          </pattern>
-          <pattern id="pat-stripes-A" patternUnits="userSpaceOnUse" width="14" height="14" patternTransform="rotate(-30)">
-            <rect x="0" y="0" width="6" height="14" fill="var(--letter-color-A)"/>
-          </pattern>
-          <pattern id="pat-stripes-Y" patternUnits="userSpaceOnUse" width="14" height="14" patternTransform="rotate(-30)">
-            <rect x="0" y="0" width="6" height="14" fill="var(--letter-color-Y)"/>
-          </pattern>
-          <pattern id="pat-stripes-O" patternUnits="userSpaceOnUse" width="14" height="14" patternTransform="rotate(-30)">
-            <rect x="0" y="0" width="6" height="14" fill="var(--letter-color-O)"/>
-          </pattern>
-          <pattern id="pat-stripes-R" patternUnits="userSpaceOnUse" width="14" height="14" patternTransform="rotate(-30)">
-            <rect x="0" y="0" width="6" height="14" fill="var(--letter-color-R)"/>
-          </pattern>
-          <!-- Diagonal shine gradient that animates across the letters -->
-          <linearGradient id="shine-grad" x1="0%" y1="0%" x2="100%" y2="0%" gradientUnits="userSpaceOnUse">
-            <stop offset="0%"  stop-color="rgba(255,255,255,0)"/>
-            <stop offset="44%" stop-color="rgba(255,255,255,0)"/>
-            <stop offset="50%" stop-color="rgba(255,255,255,0.55)"/>
-            <stop offset="56%" stop-color="rgba(255,255,255,0)"/>
-            <stop offset="100%" stop-color="rgba(255,255,255,0)"/>
-          </linearGradient>
-          <!-- Mask containing only the letters so the shine is clipped to them -->
-          <mask id="letter-mask">
-            <rect x="0" y="0" width="1500" height="480" fill="black"/>
-            <text data-mask-text x="750" y="380" font-family="Display, Arial Narrow Bold, sans-serif"
-                  font-weight="900" font-size="440" text-anchor="middle"
-                  letter-spacing="-18" fill="white">MAYOR</text>
-          </mask>
-        </defs>
-        <!-- Letters rebuilt by motion.js whenever the word changes. Initial
-             pre-render is plain MAYOR so the first paint is instant. -->
         <g id="mayor-letters" font-family="Display, Arial Narrow Bold, sans-serif"
                               font-weight="900" font-size="440" text-anchor="middle">
-          <text class="ml" data-letter="M" data-mode="solid" x="180"  y="380">M</text>
-          <text class="ml" data-letter="A" data-mode="solid" x="465"  y="380">A</text>
-          <text class="ml" data-letter="Y" data-mode="solid" x="750"  y="380">Y</text>
-          <text class="ml" data-letter="O" data-mode="solid" x="1035" y="380">O</text>
-          <text class="ml" data-letter="R" data-mode="solid" x="1320" y="380">R</text>
+          <text class="ml" data-letter="M" x="180"  y="380">M</text>
+          <text class="ml" data-letter="A" x="465"  y="380">A</text>
+          <text class="ml" data-letter="Y" x="750"  y="380">Y</text>
+          <text class="ml" data-letter="O" x="1035" y="380">O</text>
+          <text class="ml" data-letter="R" x="1320" y="380">R</text>
         </g>
       </svg>
     </div>
-
-    <!-- Specular sweep — a moving white gradient masked into the letters -->
-    <div class="layer shine" data-layer="shine">
-      <svg viewBox="0 0 1500 480" preserveAspectRatio="xMidYMid meet">
-        <rect data-shine-rect x="-700" y="0" width="700" height="480"
-              fill="url(#shine-grad)" mask="url(#letter-mask)"/>
-      </svg>
-    </div>
   </div>
 
-  <!-- Tagline -->
-  <div class="tagline" aria-hidden="true">
-    <span data-tagline>The Office of The Mayor</span>
-    <span class="dot"></span>
-    <span data-tagstat>est. mmxxvi</span>
-  </div>
-
-  <!-- Sparks -->
-  <div class="sparks" data-sparks aria-hidden="true"></div>
-
-  <!-- Top chips -->
-  <div class="top l">
-    <div class="chip">
-      <span class="live"></span>
-      <span class="num" data-stat-num>0</span>
-      <span class="lab" data-stat-lab>citizens</span>
-    </div>
-  </div>
-  <div class="top r">
-    <a class="chip" href="https://n3wth.com" rel="noopener">n3wth.com</a>
-  </div>
-
-  <!-- Step sequencer — 5 voices × 16 steps. Each cell toggles a note. -->
-  <div class="seq" data-seq aria-label="Step sequencer">
-    <span></span>
-    <div class="head" data-seq-head>
-      <span></span><span></span><span></span><span></span>
-      <span class="beat"></span><span></span><span></span><span></span>
-      <span class="beat"></span><span></span><span></span><span></span>
-      <span class="beat"></span><span></span><span></span><span></span>
-    </div>
-    <!-- 5 rows × 16 cells injected by motion.js so cell handlers can be wired. -->
-  </div>
-
-  <!-- Dimension switcher — keyboard 1..6, also clickable -->
-  <div class="dim" data-dim>
-    <span class="label">dim</span>
-    <button class="key" data-d="1">1</button>
-    <button class="key" data-d="2">2</button>
-    <button class="key" data-d="3">3</button>
-    <button class="key" data-d="4">4</button>
-    <button class="key" data-d="5">5</button>
-    <button class="key" data-d="6">6</button>
-    <span class="label" data-dim-name>2D · flat</span>
-  </div>
-
-  <!-- Live shared toolbox — click a letter, then color/mode. Word/vibe/tempo are global. -->
-  <div class="toolbox" aria-label="Letter style">
-    <div class="pill palette" data-palette>
-      <button data-color="#f0d72a" style="background:#f0d72a"></button>
-      <button data-color="#ffffff" style="background:#ffffff"></button>
-      <button data-color="#ff8a3d" style="background:#ff8a3d"></button>
-      <button data-color="#7dd3fc" style="background:#7dd3fc"></button>
-      <button data-color="#a78bfa" style="background:#a78bfa"></button>
-      <button data-color="#34d399" style="background:#34d399"></button>
-      <button data-color="#f472b6" style="background:#f472b6"></button>
-      <button data-color="#fb7185" style="background:#fb7185"></button>
-    </div>
-    <div class="pill modes" data-modes>
-      <button data-mode="solid" title="Solid">
-        <svg viewBox="0 0 14 14"><rect x="1" y="1" width="12" height="12" rx="2" fill="currentColor"/></svg>
-      </button>
-      <button data-mode="outline" title="Outline">
-        <svg viewBox="0 0 14 14"><rect x="1.5" y="1.5" width="11" height="11" rx="2" fill="none" stroke="currentColor" stroke-width="1.6"/></svg>
-      </button>
-      <button data-mode="dotted" title="Dotted">
-        <svg viewBox="0 0 14 14">
-          <circle cx="3" cy="3" r="1.4" fill="currentColor"/>
-          <circle cx="7" cy="3" r="1.4" fill="currentColor"/>
-          <circle cx="11" cy="3" r="1.4" fill="currentColor"/>
-          <circle cx="3" cy="7" r="1.4" fill="currentColor"/>
-          <circle cx="7" cy="7" r="1.4" fill="currentColor"/>
-          <circle cx="11" cy="7" r="1.4" fill="currentColor"/>
-          <circle cx="3" cy="11" r="1.4" fill="currentColor"/>
-          <circle cx="7" cy="11" r="1.4" fill="currentColor"/>
-          <circle cx="11" cy="11" r="1.4" fill="currentColor"/>
-        </svg>
-      </button>
-      <button data-mode="stripes" title="Stripes">
-        <svg viewBox="0 0 14 14">
-          <line x1="0"  y1="13" x2="13" y2="0"  stroke="currentColor" stroke-width="1.6"/>
-          <line x1="-4" y1="9"  x2="9"  y2="-4" stroke="currentColor" stroke-width="1.6"/>
-          <line x1="4"  y1="17" x2="17" y2="4"  stroke="currentColor" stroke-width="1.6"/>
-        </svg>
-      </button>
-    </div>
-    <!-- Language picker (global) -->
-    <div class="pill langs" data-langs>
-      <button data-word="en" title="English">en</button>
-      <button data-word="es" title="Alcalde">es</button>
-      <button data-word="fr" title="Maire">fr</button>
-      <button data-word="de" title="Bürgermeister">de</button>
-      <button data-word="it" title="Sindaco">it</button>
-      <button data-word="ja" title="市長">ja</button>
-      <button data-word="zh" title="市长">zh</button>
-      <button data-word="ar" title="رئيس">ar</button>
-      <button data-word="ru" title="Мэр">ru</button>
-      <button data-word="ko" title="시장">ko</button>
-      <button data-word="el" title="Δήμαρχος">el</button>
-      <button data-word="he" title="ראש">he</button>
-      <button data-word="bk" title="BURGER 👑">bk</button>
-    </div>
-    <!-- Vibe picker (global) — non-yellow accent dots = the new mood. -->
-    <div class="pill vibes" data-vibes>
-      <button data-vibe="default" title="Mayor" style="background:#f0d72a"></button>
-      <button data-vibe="dawn"     title="Dawn"  style="background:linear-gradient(135deg,#ff8a3d,#f472b6)"></button>
-      <button data-vibe="electric" title="Electric" style="background:linear-gradient(135deg,#22d3ee,#a78bfa)"></button>
-      <button data-vibe="mono"     title="Mono"  style="background:linear-gradient(135deg,#aaa,#fff)"></button>
-      <button data-vibe="forest"   title="Forest" style="background:linear-gradient(135deg,#34d399,#10b981)"></button>
-      <button data-vibe="sunset"   title="Sunset" style="background:linear-gradient(135deg,#fb7185,#ffb000)"></button>
-    </div>
-    <!-- Tempo (shared BPM) -->
-    <div class="tempo">
-      <span>tempo</span>
-      <input type="range" min="30" max="180" step="1" value="60" data-tempo>
-      <span class="bpm" data-tempo-bpm>60</span>
-    </div>
-    <!-- Confetti — pure dopamine -->
-    <button class="confetti-btn" data-confetti title="Confetti">🎉 confetti</button>
-    <!-- Lamp toggle: light/dark for everyone -->
-    <button class="confetti-btn" data-lamp title="Light/Dark">💡 lamp</button>
-    <!-- Sound toggle: tempo kick on/off -->
-    <button class="confetti-btn" data-sound title="Toggle beat">🔇 sound</button>
-  </div>
+  <!-- Corners -->
+  <div class="corner tl"><span class="live"></span><span data-presence>connecting</span></div>
+  <div class="corner tr"><a href="https://n3wth.com">n3wth.com</a></div>
 
   <!-- CTA -->
-  <div class="cta-wrap">
-    <a class="cta" href="mailto:um@mayor.wtf">
-      <span class="pin"></span>
-      <span>um@mayor.wtf</span>
-      <span class="arrow">→</span>
-    </a>
-  </div>
+  <a class="cta" href="mailto:um@mayor.wtf">
+    <span class="pin"></span>
+    <span>um@mayor.wtf</span>
+  </a>
+
+  <!-- Sound -->
+  <button class="sound" data-sound>🔇 sound</button>
 
   <!-- Cursor -->
   <div class="cursor-halo" data-cursor-halo aria-hidden="true"></div>

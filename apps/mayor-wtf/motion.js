@@ -1,71 +1,28 @@
-// Mayor motion — beauty pass.
+// Mayor motion — the Awe build.
 //
-// Restraint over flourish. The page sits still until something real happens.
-// The only ambient motion is a slow drift in the WebGL field and a periodic
-// specular sweep across the letters every ~8 seconds.
+// One thing, breathtaking. The page is a quiet cathedral:
+// — Volumetric yellow field, breathing.
+// — MAYOR sculpted with weight: cursor tilts the slab with momentum.
+// — A continuous tonal drone (Tone.js) — the room's sound.
+// — Click anywhere → a single note + a synced ripple. Pentatonic, can't
+//   sound bad. Played in real time for everyone in the room.
+// — Each visitor is a drifting soft star on the field; you can SEE other
+//   minds present without faces.
+// — First click = a controlled scale-shock: hero swells +12% and settles.
+// All other widgets, sequencers, palettes, etc. are gone.
 
 const reduceMotion = () =>
   window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
-const STATS_URL = "/api/stats";
-const POLL_MS = 5000;
 const SYNC_BASE = "https://inbox.mayor.wtf";
+const SELF_ID = (Math.random().toString(36) + Date.now().toString(36)).slice(2, 14);
 
-// Stable per-tab nonce so SSE peers can ignore their own echoed events.
-const SELF_ID = (() => {
-  const g = (Math.random().toString(36) + Date.now().toString(36)).slice(2, 14);
-  try { return g; } catch { return "anon"; }
-})();
-
-const E = {
-  out:    "expo.out",
-  inOut:  "sine.inOut",
-  bounce: "elastic.out(1, 0.6)",
-  glide:  "power4.out",
-};
-
-const SPARK_COLORS = ["#ffd54a", "#ffb000"]; // restrained — yellow family only
-
-// ── DICTIONARY: words for the hero, by language code ───────────────────
-// Each renders centered. The N glyphs map to the M-A-Y-O-R "slots" cyclically
-// for color/mode mapping. So for 2-glyph 'zh', the two chars get slots M and A.
-const WORDS = {
-  en: "MAYOR",
-  es: "ALCALDE",
-  fr: "MAIRE",
-  de: "BÜRGER",
-  it: "SINDACO",
-  ja: "市長",
-  zh: "市长",
-  ar: "رئيس",
-  ru: "МЭР",
-  ko: "시장",
-  el: "ΔΉΜΑΡΧΟΣ",
-  he: "ראש",
-  bk: "BURGER", // 👑 the burgdom
-};
-
-// ── VIBES: background & palette themes ─────────────────────────────────
-// Each vibe overrides a few CSS variables and the WebGL field's color
-// uniforms. Yellow stays as a default; vibes shift the page mood.
-const VIBES = {
-  default:  { y: "#f0d72a", k: "#060606", deep: [0.42,0.36,0.05], mid: [0.78,0.69,0.12], hi: [1.00,0.83,0.27] },
-  dawn:     { y: "#ffd1a8", k: "#1a0d18", deep: [0.32,0.18,0.18], mid: [0.95,0.55,0.40], hi: [1.00,0.78,0.55] },
-  electric: { y: "#7dd3fc", k: "#040414", deep: [0.10,0.08,0.32], mid: [0.30,0.55,0.95], hi: [0.65,0.85,1.00] },
-  mono:     { y: "#ffffff", k: "#0a0a0a", deep: [0.18,0.18,0.18], mid: [0.55,0.55,0.55], hi: [0.95,0.95,0.95] },
-  forest:   { y: "#34d399", k: "#04140d", deep: [0.05,0.18,0.10], mid: [0.18,0.55,0.32], hi: [0.50,0.85,0.62] },
-  sunset:   { y: "#fb7185", k: "#180810", deep: [0.30,0.10,0.18], mid: [0.95,0.35,0.45], hi: [1.00,0.69,0.42] },
-};
-
-// ── BACKGROUND: WebGL volumetric yellow ─────────────────────────────────
+// ── BACKGROUND FIELD ────────────────────────────────────────────────────
 function initField(canvas) {
   const gl = canvas.getContext("webgl", { antialias: false, alpha: true });
   if (!gl) return null;
 
-  const VS = `
-    attribute vec2 a_pos;
-    void main() { gl_Position = vec4(a_pos, 0.0, 1.0); }
-  `;
+  const VS = `attribute vec2 a_pos; void main() { gl_Position = vec4(a_pos, 0.0, 1.0); }`;
   const FS = `
     precision mediump float;
     uniform vec2 u_res;
@@ -74,9 +31,6 @@ function initField(canvas) {
     uniform vec2 u_mouse;
     uniform vec2 u_pulse;
     uniform float u_pulseAge;
-    uniform vec3 u_deep;
-    uniform vec3 u_mid;
-    uniform vec3 u_hi;
 
     float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
     float noise(vec2 p) {
@@ -90,7 +44,6 @@ function initField(canvas) {
     }
     float fbm(vec2 p) {
       float v = 0.0, a = 0.5;
-      // 3 octaves is plenty for this aesthetic; was 5.
       for (int i = 0; i < 3; i++) { v += a * noise(p); p *= 2.07; a *= 0.5; }
       return v;
     }
@@ -101,23 +54,19 @@ function initField(canvas) {
       p.x *= u_res.x / u_res.y;
 
       float t = u_time * 0.025;
-
-      // Two soft yellow lights drifting through space
       vec2 well1 = vec2(sin(t * 0.7) * 0.55, cos(t * 0.5) * 0.30);
       vec2 well2 = vec2(cos(t * 0.6 + 1.7) * 0.65, sin(t * 0.4 + 0.4) * 0.45);
       float d1 = length(p - well1);
       float d2 = length(p - well2);
-
       vec2 m = (u_mouse * 2.0 - 1.0) * vec2(u_res.x / u_res.y, 1.0);
       float dm = length(p - m);
 
       vec2 q = vec2(fbm(p + t), fbm(p - t * 0.6));
       float n = fbm(p * 1.5 + q * (0.4 + u_intensity * 0.4));
 
-      // Vibe-controlled palette (uniforms)
-      vec3 deep = u_deep;
-      vec3 mid_ = u_mid;
-      vec3 hi   = u_hi;
+      vec3 deep = vec3(0.42, 0.36, 0.05);
+      vec3 mid_ = vec3(0.78, 0.69, 0.12);
+      vec3 hi   = vec3(1.00, 0.83, 0.27);
 
       float light1 = smoothstep(1.5, 0.0, d1);
       float light2 = smoothstep(1.3, 0.0, d2);
@@ -130,14 +79,13 @@ function initField(canvas) {
       float shade = 0.55 + n * 0.5;
       col *= shade;
 
-      // Pulse ring
-      float pulseR = u_pulseAge * 0.7;
+      // Click ripple — a slow expanding ring. Reads as PHYSICAL.
+      float pulseR = u_pulseAge * 0.85;
       vec2 pp = (u_pulse * 2.0 - 1.0) * vec2(u_res.x / u_res.y, 1.0);
       float pd = length(p - pp);
-      float ring = exp(-pow((pd - pulseR) * 6.0, 2.0)) * exp(-u_pulseAge * 0.7);
-      col += hi * ring * 0.45;
+      float ring = exp(-pow((pd - pulseR) * 5.5, 2.0)) * exp(-u_pulseAge * 0.55);
+      col += hi * ring * 0.55;
 
-      // Strong vignette so chrome stays readable
       float vig = smoothstep(1.8, 0.5, length(p));
       col *= mix(0.18, 1.0, vig);
 
@@ -179,17 +127,12 @@ function initField(canvas) {
     mouse: gl.getUniformLocation(prog, "u_mouse"),
     pulse: gl.getUniformLocation(prog, "u_pulse"),
     pulseAge: gl.getUniformLocation(prog, "u_pulseAge"),
-    deep: gl.getUniformLocation(prog, "u_deep"),
-    mid: gl.getUniformLocation(prog, "u_mid"),
-    hi: gl.getUniformLocation(prog, "u_hi"),
   };
 
-  // Render the field at HALF resolution. The noise is so soft that pixel
-  // doubling is invisible, and we cut shader work to ~25%.
-  let scale = 0.5;
+  const SCALE = 0.5;
   function resize() {
-    canvas.width = Math.max(1, (canvas.clientWidth * scale) | 0);
-    canvas.height = Math.max(1, (canvas.clientHeight * scale) | 0);
+    canvas.width = Math.max(1, (canvas.clientWidth * SCALE) | 0);
+    canvas.height = Math.max(1, (canvas.clientHeight * SCALE) | 0);
     canvas.style.width = "100%";
     canvas.style.height = "100%";
     gl.viewport(0, 0, canvas.width, canvas.height);
@@ -197,17 +140,8 @@ function initField(canvas) {
   resize();
   window.addEventListener("resize", resize);
 
-  let state = {
-    intensity: 0,
-    mouse: [0.5, 0.5],
-    pulse: [0.5, 0.5],
-    pulseStart: -10,
-    deep: [0.42, 0.36, 0.05],
-    mid: [0.78, 0.69, 0.12],
-    hi: [1.00, 0.83, 0.27],
-  };
+  let state = { intensity: 0, mouse: [0.5, 0.5], pulse: [0.5, 0.5], pulseStart: -10 };
   const t0 = performance.now();
-
   let raf = 0;
   let paused = false;
   document.addEventListener("visibilitychange", () => { paused = document.hidden; });
@@ -220,9 +154,6 @@ function initField(canvas) {
       gl.uniform2f(u.mouse, state.mouse[0], state.mouse[1]);
       gl.uniform2f(u.pulse, state.pulse[0], state.pulse[1]);
       gl.uniform1f(u.pulseAge, t - state.pulseStart);
-      gl.uniform3f(u.deep, state.deep[0], state.deep[1], state.deep[2]);
-      gl.uniform3f(u.mid, state.mid[0], state.mid[1], state.mid[2]);
-      gl.uniform3f(u.hi, state.hi[0], state.hi[1], state.hi[2]);
       gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
     }
     raf = requestAnimationFrame(tick);
@@ -232,7 +163,6 @@ function initField(canvas) {
   return {
     setIntensity: (v) => { state.intensity = Math.max(0, Math.min(1, v)); },
     setMouse: (x, y) => { state.mouse = [x, y]; },
-    setVibe: (deep, mid, hi) => { state.deep = deep; state.mid = mid; state.hi = hi; },
     triggerPulse: (x, y) => {
       state.pulse = [x, y];
       state.pulseStart = (performance.now() - t0) / 1000;
@@ -241,11 +171,12 @@ function initField(canvas) {
   };
 }
 
-// ── INK PARTICLES (subtle, low-opacity, behind hero) ────────────────────
-function initStream(canvas, getDensity) {
+// ── PRESENCE STARS ───────────────────────────────────────────────────────
+// One soft point of light per visitor (excluding self). Drifts gently.
+// Stars are just dots with motion; their VALUE is "you can see other minds."
+function initStars(canvas) {
   const ctx = canvas.getContext("2d");
   if (!ctx) return null;
-
   let dpr = Math.min(2, window.devicePixelRatio || 1);
   let W = 0, H = 0;
   function resize() {
@@ -256,847 +187,345 @@ function initStream(canvas, getDensity) {
   resize();
   window.addEventListener("resize", resize);
 
-  const MAX = 60;
-  const particles = [];
-  for (let i = 0; i < MAX; i++) {
-    particles.push({
-      x: Math.random() * W,
-      y: Math.random() * H,
-      vx: 0, vy: 0,
-      life: Math.random() * 200 + 100,
-      age: 0,
-      r: 0.5 + Math.random() * 1.0,
-      alive: false,
-    });
-  }
-  function noise2(x, y) {
-    const n = Math.sin(x * 12.9898 + y * 78.233) * 43758.5453;
-    return n - Math.floor(n);
-  }
-  function flowAngle(x, y, t) {
-    const fx = x * 0.0014 + t * 0.04;
-    const fy = y * 0.0014;
-    return (noise2(Math.floor(fx * 4) / 4, Math.floor(fy * 4) / 4) +
-            noise2(Math.floor(fx * 2) / 2, Math.floor(fy * 2) / 2) * 0.5) * Math.PI * 2;
-  }
-
+  // Stable per-visitor seed (server gives us a count, not IDs, so we
+  // generate stable jitter from indices). Self is index 0; hidden.
+  let count = 1;
   let raf = 0;
-  let t = 0;
-  function tick() {
-    t += 0.016;
-    ctx.clearRect(0, 0, W, H);
-    const target = Math.min(MAX, Math.max(8, getDensity()));
-    let alive = 0;
-    for (const p of particles) if (p.alive) alive++;
-    if (alive < target) {
-      for (const p of particles) {
-        if (alive >= target) break;
-        if (!p.alive) {
-          p.alive = true;
-          p.x = Math.random() * W;
-          p.y = Math.random() * H;
-          p.age = 0;
-          p.life = 120 + Math.random() * 220;
-          alive++;
-        }
-      }
-    } else if (alive > target) {
-      for (const p of particles) {
-        if (alive <= target) break;
-        if (p.alive && Math.random() < 0.02) { p.alive = false; alive--; }
-      }
-    }
+  let paused = false;
+  document.addEventListener("visibilitychange", () => { paused = document.hidden; });
 
-    ctx.fillStyle = "rgba(0,0,0,0.6)";
-    for (const p of particles) {
-      if (!p.alive) continue;
-      const a = flowAngle(p.x, p.y, t);
-      p.vx = p.vx * 0.88 + Math.cos(a) * 0.45;
-      p.vy = p.vy * 0.88 + Math.sin(a) * 0.45;
-      p.x += p.vx;
-      p.y += p.vy;
-      p.age++;
-      if (p.age > p.life || p.x < -10 || p.x > W + 10 || p.y < -10 || p.y > H + 10) {
-        p.alive = false;
-        continue;
+  function tick() {
+    if (!paused) {
+      const t = performance.now() / 1000;
+      ctx.clearRect(0, 0, W, H);
+      // i=0 is self, hidden. Render i=1..count-1.
+      for (let i = 1; i < count; i++) {
+        // Stable drift — each visitor has unique slow elliptical orbit.
+        const seed = i * 13.37;
+        const cx = W * (0.5 + 0.32 * Math.sin(t * 0.06 + seed));
+        const cy = H * (0.5 + 0.22 * Math.cos(t * 0.07 + seed * 1.3));
+        const r = (10 + Math.sin(t * 0.5 + seed) * 4) * dpr;
+
+        // Soft yellow glow
+        const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, r * 6);
+        grad.addColorStop(0, "rgba(255, 220, 80, 0.55)");
+        grad.addColorStop(0.4, "rgba(255, 200, 60, 0.18)");
+        grad.addColorStop(1, "rgba(255, 200, 60, 0)");
+        ctx.fillStyle = grad;
+        ctx.beginPath();
+        ctx.arc(cx, cy, r * 6, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Tight bright core
+        ctx.fillStyle = "rgba(255,240,160,0.95)";
+        ctx.beginPath();
+        ctx.arc(cx, cy, 2 * dpr, 0, Math.PI * 2);
+        ctx.fill();
       }
-      const fadeIn = Math.min(1, p.age / 40);
-      const fadeOut = Math.min(1, (p.life - p.age) / 40);
-      ctx.globalAlpha = Math.min(fadeIn, fadeOut) * 0.32;
-      ctx.beginPath();
-      ctx.arc(p.x, p.y, p.r * dpr, 0, Math.PI * 2);
-      ctx.fill();
     }
-    ctx.globalAlpha = 1;
     raf = requestAnimationFrame(tick);
   }
   raf = requestAnimationFrame(tick);
 
-  return { destroy: () => { cancelAnimationFrame(raf); window.removeEventListener("resize", resize); } };
+  return {
+    setCount: (n) => { count = Math.max(1, n | 0); },
+    destroy: () => { cancelAnimationFrame(raf); window.removeEventListener("resize", resize); },
+  };
 }
 
-// ── SPARKS ──────────────────────────────────────────────────────────────
-function emitSparks(gsap, container, x, y, count, opts = {}) {
-  if (!container) return;
-  const palette = opts.colors || SPARK_COLORS;
-  const radius = opts.radius || 160;
-  for (let i = 0; i < count; i++) {
-    const el = document.createElement("div");
-    el.className = "spark";
-    const color = palette[Math.floor(Math.random() * palette.length)];
-    const size = 3 + Math.random() * 4;
-    el.style.width = `${size}px`;
-    el.style.height = `${size}px`;
-    el.style.left = `${x}px`;
-    el.style.top = `${y}px`;
-    el.style.background = color;
-    el.style.boxShadow = `0 0 ${size * 3}px ${color}`;
-    container.appendChild(el);
-    const angle = -Math.PI / 2 + (Math.random() - 0.5) * 1.4;
-    const dist = radius * (0.4 + Math.random() * 0.7);
-    const dx = Math.cos(angle) * dist;
-    const dy = Math.sin(angle) * dist;
-    const dur = 1.0 + Math.random() * 0.9;
-    gsap.fromTo(el,
-      { x: 0, y: 0, scale: 0.2, opacity: 1 },
-      { x: dx, y: dy, scale: 1, duration: dur, ease: "power2.out" }
-    );
-    gsap.to(el, { y: dy + 200, duration: dur * 0.9, delay: dur * 0.7, ease: "power2.in" });
-    gsap.to(el, {
-      opacity: 0, scale: 0.2,
-      duration: 0.7, delay: dur * 1.0, ease: "power2.in",
-      onComplete: () => el.remove(),
-    });
+// ── NOTE RIPPLES ─────────────────────────────────────────────────────────
+// Concentric rings expanding from a click point. Multiple rings can be
+// alive at once (different visitors, different times). Drawn on a 2D canvas.
+function initRipples(canvas) {
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return null;
+  let dpr = Math.min(2, window.devicePixelRatio || 1);
+  let W = 0, H = 0;
+  function resize() {
+    canvas.width = (canvas.clientWidth * dpr) | 0;
+    canvas.height = (canvas.clientHeight * dpr) | 0;
+    W = canvas.width; H = canvas.height;
   }
+  resize();
+  window.addEventListener("resize", resize);
+
+  const ripples = [];
+  let raf = 0;
+  let paused = false;
+  document.addEventListener("visibilitychange", () => { paused = document.hidden; });
+
+  function tick() {
+    if (!paused) {
+      ctx.clearRect(0, 0, W, H);
+      const now = performance.now();
+      for (let i = ripples.length - 1; i >= 0; i--) {
+        const r = ripples[i];
+        const age = (now - r.t0) / 1000;
+        if (age > 2.6) { ripples.splice(i, 1); continue; }
+        const radius = age * 320 * dpr;
+        const alpha = Math.max(0, 1 - age / 2.6) * (r.self ? 0.85 : 0.55);
+        ctx.strokeStyle = `rgba(255, 220, 80, ${alpha})`;
+        ctx.lineWidth = (r.self ? 2.2 : 1.6) * dpr;
+        ctx.beginPath();
+        ctx.arc(r.x * dpr, r.y * dpr, radius, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+    }
+    raf = requestAnimationFrame(tick);
+  }
+  raf = requestAnimationFrame(tick);
+
+  return {
+    add: (x, y, self = false) => {
+      ripples.push({ x, y, self, t0: performance.now() });
+      if (ripples.length > 24) ripples.shift();
+    },
+    destroy: () => { cancelAnimationFrame(raf); window.removeEventListener("resize", resize); },
+  };
 }
 
+// ── AUDIO: continuous drone + pentatonic note plucks ────────────────────
+// Tone.js. The page sounds like a cathedral. Always-on once enabled —
+// browser autoplay policy means the user has to click sound-on once.
+let Tone = null;
+let droneStarted = false;
+let droneNodes = null;
+let pluckSynth = null;
+let audioReady = false;
+
+// Pentatonic scale (A minor pentatonic, octaves 3–5). X position picks pitch.
+const PENT = [
+  "A2", "C3", "D3", "E3", "G3",
+  "A3", "C4", "D4", "E4", "G4",
+  "A4", "C5", "D5", "E5", "G5",
+  "A5",
+];
+function noteForX(nx) {
+  const i = Math.max(0, Math.min(PENT.length - 1, Math.floor(nx * PENT.length)));
+  return PENT[i];
+}
+
+function initAudio() {
+  if (audioReady) return true;
+  Tone = window.Tone;
+  if (!Tone) return false;
+
+  // The drone: two slow detuned sine pads through reverb + filter.
+  // Quiet, room-tone level. Built so it keeps you company without nagging.
+  const reverb = new Tone.Reverb({ decay: 8, wet: 0.6 }).toDestination();
+  const filter = new Tone.Filter(800, "lowpass").connect(reverb);
+  filter.Q.value = 0.9;
+
+  const padA = new Tone.Oscillator({ type: "sine", frequency: "A2", volume: -22 }).connect(filter);
+  const padE = new Tone.Oscillator({ type: "sine", frequency: "E3", volume: -22 }).connect(filter);
+  // A slowly-modulated detune so the pad never sits still.
+  const lfo = new Tone.LFO({ frequency: 0.05, min: -8, max: 8 }).start();
+  lfo.connect(padE.detune);
+
+  // Pluck — bright marimba-ish. Reads as "a single thought."
+  pluckSynth = new Tone.Synth({
+    oscillator: { type: "triangle" },
+    envelope: { attack: 0.005, decay: 0.4, sustain: 0.0, release: 1.2 },
+  });
+  const pluckReverb = new Tone.Reverb({ decay: 4.5, wet: 0.45 }).toDestination();
+  pluckSynth.connect(pluckReverb);
+  pluckSynth.volume.value = -10;
+
+  droneNodes = { padA, padE, filter, reverb, lfo };
+  audioReady = true;
+  return true;
+}
+
+function startDrone() {
+  if (!droneNodes || droneStarted) return;
+  // Start pads on next bar
+  droneNodes.padA.start();
+  droneNodes.padE.start();
+  droneStarted = true;
+}
+
+function pluck(note, when = 0, vel = 0.7) {
+  if (!pluckSynth) return;
+  try {
+    pluckSynth.triggerAttackRelease(note, "8n", when || Tone.now(), vel);
+  } catch {}
+}
+
+// ── ENTRY POINT ──────────────────────────────────────────────────────────
 export function initMotion(gsap) {
   if (!gsap) return { destroy: () => {} };
   const reduced = reduceMotion();
 
-  const sparksLayer = document.querySelector("[data-sparks]");
   const fieldCanvas = document.querySelector("[data-field]");
-  const streamCanvas = document.querySelector("[data-stream]");
+  const starsCanvas = document.querySelector("[data-stars]");
+  const ripplesCanvas = document.querySelector("[data-ripples]");
   const halo = document.querySelector("[data-cursor-halo]");
   const dot = document.querySelector("[data-cursor-dot]");
+  const presenceEl = document.querySelector("[data-presence]");
+  const soundBtn = document.querySelector("[data-sound]");
   const layers = {
-    back:  document.querySelector('[data-layer="back"]'),
-    mid:   document.querySelector('[data-layer="mid"]'),
-    shine: document.querySelector('[data-layer="shine"]'),
+    back: document.querySelector('[data-layer="back"]'),
+    mid: document.querySelector('[data-layer="mid"]'),
   };
-  // Letters are rebuilt whenever the active word changes. Use a getter so
-  // every consumer sees the current set.
-  let letters = Array.from(document.querySelectorAll(".ml"));
-  function bindLetters() {
-    letters.forEach((l) => {
-      l.style.transformBox = "fill-box";
-      l.style.transformOrigin = "center bottom";
-      // (Re-bind click handlers — they get reattached every rebuild.)
-      l.addEventListener("click", onLetterClick);
-    });
-  }
-  const shineRect = document.querySelector("[data-shine-rect]");
-  const statNum = document.querySelector("[data-stat-num]");
-  const statLab = document.querySelector("[data-stat-lab]");
-  const tagstat = document.querySelector("[data-tagstat]");
+  const letters = Array.from(document.querySelectorAll(".ml"));
+  letters.forEach((l) => {
+    l.style.transformBox = "fill-box";
+    l.style.transformOrigin = "center bottom";
+  });
 
-  // ── FIELD + STREAM ──
-  // Stream (CPU canvas particles) is off by default — it's expensive and
-  // duplicates the field's noise feel. Field shader stays on (cheap, GPU).
-  let fieldHandle = null, streamHandle = null;
-  let streamDensity = 0;
+  let fieldHandle = null, starsHandle = null, ripplesHandle = null;
   if (!reduced) {
     fieldHandle = initField(fieldCanvas);
-    // streamHandle = initStream(streamCanvas, () => streamDensity); // disabled for perf
-    if (streamCanvas) streamCanvas.style.display = "none";
+    starsHandle = initStars(starsCanvas);
+    ripplesHandle = initRipples(ripplesCanvas);
   }
 
-  // ── HERO ENTRANCE: cinematic letter reveal ──
-  // Each letter starts below baseline, masked by container overflow, slides
-  // up into place with stagger. The halo and shine fade in afterward.
+  // ── ENTRANCE: hero swells in from below, slowly. The pause before sound. ──
   if (!reduced) {
-    gsap.set(layers.back, { opacity: 0, scale: 0.92 });
-    gsap.set(layers.shine, { opacity: 0 });
     gsap.set(letters, { yPercent: 110, opacity: 0 });
-
-    const tl = gsap.timeline({ defaults: { ease: E.glide } });
-    tl.to(letters, {
-      yPercent: 0,
-      opacity: 1,
-      duration: 1.2,
-      stagger: 0.07,
-    }, 0)
-      .to(layers.back, { opacity: 1, scale: 1, duration: 1.6, ease: E.out }, 0.3)
-      .to(layers.shine, { opacity: 0.9, duration: 0.8 }, 0.9)
-      .from(".tagline, .top.l, .top.r, .cta-wrap", {
-        opacity: 0, y: 10, duration: 0.9, stagger: 0.08,
-      }, 0.7);
+    gsap.set(layers.back, { opacity: 0 });
+    gsap.to(letters, {
+      yPercent: 0, opacity: 1,
+      duration: 1.6, stagger: 0.09, ease: "expo.out", delay: 0.1,
+    });
+    gsap.to(layers.back, { opacity: 1, duration: 2.0, delay: 0.4 });
+    gsap.from(".cta, .corner, .sound", { opacity: 0, y: 8, duration: 1.0, stagger: 0.1, ease: "expo.out", delay: 1.0 });
   }
 
-  // ── SHINE SWEEP: every ~8s, a soft white pass slides across MAYOR ──
-  // The rect is 700 wide and starts at x=-700 (offscreen left). We slide
-  // it to x=1500 (offscreen right) over 1.6s, then wait ~6.5s, then repeat.
-  if (!reduced && shineRect) {
-    const sweep = () => {
-      gsap.fromTo(shineRect,
-        { attr: { x: -700 } },
-        {
-          attr: { x: 1500 },
-          duration: 1.6,
-          ease: "sine.inOut",
-          onComplete: () => {
-            gsap.delayedCall(6.5 + Math.random() * 2, sweep);
-          },
-        }
-      );
-    };
-    gsap.delayedCall(2.6, sweep);
-  }
-
-  // ── CURSOR ──
-  // All cursor-driven transforms use gsap.quickTo so each pointermove is
-  // a few setters, not new tween objects. Was the worst hot path on the page.
+  // ── CURSOR + WEIGHTY HERO PARALLAX ──
   if (!reduced && halo && dot) {
     const haloX = gsap.quickTo(halo, "x", { duration: 0.55, ease: "power3.out" });
     const haloY = gsap.quickTo(halo, "y", { duration: 0.55, ease: "power3.out" });
     const dotX = gsap.quickTo(dot, "x", { duration: 0.10, ease: "power2.out" });
     const dotY = gsap.quickTo(dot, "y", { duration: 0.10, ease: "power2.out" });
-    const heroEl = document.querySelector(".hero");
-    const heroRotY = heroEl ? gsap.quickTo(heroEl, "rotationY", { duration: 1.0, ease: "power3.out" }) : null;
-    const heroRotX = heroEl ? gsap.quickTo(heroEl, "rotationX", { duration: 1.0, ease: "power3.out" }) : null;
-    if (heroEl) gsap.set(heroEl, { transformPerspective: 1400 });
-    const backX = gsap.quickTo(layers.back, "x", { duration: 1.2, ease: "power3.out" });
-    const backY = gsap.quickTo(layers.back, "y", { duration: 1.2, ease: "power3.out" });
-    const midX  = gsap.quickTo(layers.mid,  "x", { duration: 1.0, ease: "power3.out" });
-    const midY  = gsap.quickTo(layers.mid,  "y", { duration: 1.0, ease: "power3.out" });
-    const shineX = gsap.quickTo(layers.shine, "x", { duration: 0.8, ease: "power3.out" });
-    const shineY = gsap.quickTo(layers.shine, "y", { duration: 0.8, ease: "power3.out" });
 
-    let lastMove = 0;
+    const heroEl = document.querySelector(".hero");
+    // Heavier mass — longer settle than before. 1.6s instead of 1.0.
+    const heroRotY = gsap.quickTo(heroEl, "rotationY", { duration: 1.6, ease: "power3.out" });
+    const heroRotX = gsap.quickTo(heroEl, "rotationX", { duration: 1.6, ease: "power3.out" });
+    gsap.set(heroEl, { transformPerspective: 1600 });
+    const backX = gsap.quickTo(layers.back, "x", { duration: 1.8, ease: "power3.out" });
+    const backY = gsap.quickTo(layers.back, "y", { duration: 1.8, ease: "power3.out" });
+    const midX = gsap.quickTo(layers.mid, "x", { duration: 1.4, ease: "power3.out" });
+    const midY = gsap.quickTo(layers.mid, "y", { duration: 1.4, ease: "power3.out" });
+
+    let last = 0;
     window.addEventListener("pointermove", (e) => {
-      // Halo + dot must follow precisely — they're the cursor.
       haloX(e.clientX); haloY(e.clientY);
       dotX(e.clientX); dotY(e.clientY);
-      // Throttle the heavier parallax updates to ~60fps frames worth.
       const now = performance.now();
-      if (now - lastMove < 16) return;
-      lastMove = now;
+      if (now - last < 16) return;
+      last = now;
       if (fieldHandle) fieldHandle.setMouse(e.clientX / window.innerWidth, 1 - e.clientY / window.innerHeight);
       const nx = e.clientX / window.innerWidth - 0.5;
       const ny = e.clientY / window.innerHeight - 0.5;
-      if (heroRotY) heroRotY(nx * 10);
-      if (heroRotX) heroRotX(-ny * 6);
-      backX(nx * 24); backY(ny * 14);
-      midX(nx * -5); midY(ny * -3);
-      shineX(nx * 30); shineY(ny * 18);
+      heroRotY(nx * 8);
+      heroRotX(-ny * 5);
+      backX(nx * 32); backY(ny * 18);
+      midX(nx * -8); midY(ny * -4);
     }, { passive: true });
 
-    document.querySelectorAll(".chip, .cta").forEach((el) => {
+    document.querySelectorAll(".cta, .corner a, .sound").forEach((el) => {
       el.addEventListener("pointerenter", () => gsap.to(halo, { scale: 1.5, duration: 0.4, ease: "power3.out" }));
       el.addEventListener("pointerleave", () => gsap.to(halo, { scale: 1, duration: 0.5, ease: "power3.out" }));
     });
   }
 
-  // ── LETTER DELIGHT (real events only) ──
-  function delightLetter(opts = {}) {
-    if (reduced || !letters.length) return;
-    const letter = opts.letter || letters[Math.floor(Math.random() * letters.length)];
-    gsap.timeline({ overwrite: false })
-      .to(letter, { yPercent: -6, scale: 1.06, duration: 0.4, ease: "back.out(2.4)" }, 0)
-      .to(letter, { yPercent: 0, scale: 1, duration: 1.4, ease: E.bounce }, 0.4);
-    if (sparksLayer) {
-      const r = letter.getBoundingClientRect();
-      emitSparks(gsap, sparksLayer, r.left + r.width / 2, r.top + r.height * 0.3, opts.count ?? 12, { radius: 160 });
+  // ── SOUND: continuous drone + per-click plucks ──
+  let soundOn = false;
+  function toggleSound(forceOn) {
+    const want = forceOn === undefined ? !soundOn : !!forceOn;
+    if (want && !audioReady) {
+      if (!initAudio()) return;
+    }
+    soundOn = want;
+    if (soundBtn) {
+      soundBtn.textContent = soundOn ? "🔊 sound" : "🔇 sound";
+      soundBtn.classList.toggle("on", soundOn);
+    }
+    if (soundOn && Tone) {
+      Tone.start().then(() => startDrone()).catch(() => {});
+    } else if (droneNodes && droneStarted) {
+      droneNodes.padA.stop();
+      droneNodes.padE.stop();
+      droneStarted = false;
     }
   }
+  if (soundBtn) soundBtn.addEventListener("click", () => toggleSound());
 
-  // ── CLICK PULSE ──
-  function shockwave(e) {
+  // ── SCALE SHOCK on first click: hero swells +12% then settles ──
+  let firstClick = true;
+  function scaleShock() {
     if (reduced) return;
-    if (fieldHandle && e) {
-      fieldHandle.triggerPulse(e.clientX / window.innerWidth, 1 - e.clientY / window.innerHeight);
-    }
-    // Letters bow softly
-    letters.forEach((l, i) => {
-      gsap.fromTo(l,
-        { y: 0 },
-        { y: -6, duration: 0.18, ease: "power2.out", delay: i * 0.04 }
-      );
-      gsap.to(l, { y: 0, duration: 0.9, ease: E.bounce, delay: i * 0.04 + 0.18 });
-    });
-    if (Math.random() < 0.34) delightLetter({ count: 10 });
-  }
-  // ── REMOTE PRESENCE: when other visitors interact, mirror it here ──
-  // Server publishes events on /events (SSE). Each event is {type,x,y,from,ts}.
-  // x/y are normalized 0..1 (screen-space). We translate to local pixel coords
-  // and fire a ghost ripple — same animation as a local click but no spark
-  // sound, so it reads as 'someone else is here'.
-  function ghostRipple(nx, ny) {
-    if (reduced) return;
-    const px = nx * window.innerWidth;
-    const py = ny * window.innerHeight;
-    if (fieldHandle) fieldHandle.triggerPulse(nx, 1 - ny);
-    // Faint dot at the spot, fades out — represents 'someone clicked here'.
-    if (sparksLayer) {
-      const ghost = document.createElement("div");
-      ghost.className = "spark";
-      ghost.style.width = "12px";
-      ghost.style.height = "12px";
-      ghost.style.left = `${px}px`;
-      ghost.style.top = `${py}px`;
-      ghost.style.background = "rgba(240,215,42,0.95)";
-      ghost.style.boxShadow = "0 0 28px rgba(240,215,42,0.7)";
-      ghost.style.transform = "translate(-50%,-50%) scale(0.4)";
-      ghost.style.opacity = "0";
-      sparksLayer.appendChild(ghost);
-      gsap.to(ghost, {
-        scale: 1.4, opacity: 1,
-        duration: 0.25,
-        ease: "power3.out",
-      });
-      gsap.to(ghost, {
-        scale: 3.5, opacity: 0,
-        duration: 1.2,
-        delay: 0.18,
-        ease: "power2.out",
-        onComplete: () => ghost.remove(),
-      });
-    }
-    // Letters bow softly as the wave passes (same as click, weaker)
-    letters.forEach((l, i) => {
-      gsap.fromTo(l,
-        { y: 0 },
-        { y: -3, duration: 0.18, ease: "power2.out", delay: i * 0.04 }
-      );
-      gsap.to(l, { y: 0, duration: 0.9, ease: E.bounce, delay: i * 0.04 + 0.18 });
-    });
-  }
-
-  // Update presence chip text when the count changes.
-  let presenceCount = 1;
-  function updatePresence(n) {
-    presenceCount = n || 1;
-    // We render presence inside the existing top-left chip when there are
-    // multiple peers; otherwise the citizens count stays as primary.
-    if (statNum && statLab && presenceCount > 1) {
-      statNum.textContent = String(presenceCount);
-      statLab.textContent = presenceCount === 2 ? "watching · you + 1" : `watching · you + ${presenceCount - 1}`;
-    }
-  }
-
-  // Publish a local event to the server so peers see it.
-  function publishEvent(type, e) {
-    let nx = 0.5, ny = 0.5;
-    if (e && typeof e.clientX === "number") {
-      nx = e.clientX / window.innerWidth;
-      ny = e.clientY / window.innerHeight;
-    }
-    // Don't await — fire and forget.
-    fetch(`${SYNC_BASE}/event`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ type, x: nx, y: ny, from: SELF_ID }),
-      keepalive: true,
-    }).catch(() => {});
-  }
-
-  // ── COLLABORATIVE PALETTE: click letter → click color → all peers update ──
-  const root = document.documentElement;
-  const palette = document.querySelector("[data-palette]");
-  const paletteButtons = palette ? Array.from(palette.querySelectorAll("button")) : [];
-  let selectedLetter = null;
-
-  function applyLetterColor(letter, color, animate = true) {
-    if (!letter || !color) return;
-    const varName = `--letter-color-${letter}`;
-    if (animate) {
-      // Tween via a proxy so we can blend old → new color smoothly.
-      const cur = getComputedStyle(root).getPropertyValue(varName).trim() || "#f0d72a";
-      const proxy = { v: 0 };
-      gsap.to(proxy, {
-        v: 1,
-        duration: 1.0,
-        ease: "sine.inOut",
-        onUpdate: () => {
-          // Linear interp between cur and color via canvas
-          const blended = lerpHex(cur, color, proxy.v);
-          root.style.setProperty(varName, blended);
-        },
-        onComplete: () => root.style.setProperty(varName, color),
-      });
-    } else {
-      root.style.setProperty(varName, color);
-    }
-  }
-
-  function lerpHex(a, b, t) {
-    const pa = parseHex(a), pb = parseHex(b);
-    if (!pa || !pb) return b;
-    const r = Math.round(pa[0] + (pb[0] - pa[0]) * t);
-    const g = Math.round(pa[1] + (pb[1] - pa[1]) * t);
-    const bl = Math.round(pa[2] + (pb[2] - pa[2]) * t);
-    return `rgb(${r},${g},${bl})`;
-  }
-  function parseHex(s) {
-    s = s.trim();
-    if (s.startsWith("#")) {
-      const h = s.slice(1);
-      const n = h.length === 3 ? h.split("").map((c) => c + c).join("") : h;
-      return [parseInt(n.slice(0, 2), 16), parseInt(n.slice(2, 4), 16), parseInt(n.slice(4, 6), 16)];
-    }
-    const m = s.match(/rgb\((\d+),\s*(\d+),\s*(\d+)\)/);
-    if (m) return [+m[1], +m[2], +m[3]];
-    return null;
-  }
-
-  // Letter click handler — also tracks click-counts per letter for birthdays.
-  const clickCounts = { M: 0, A: 0, Y: 0, O: 0, R: 0 };
-  function onLetterClick(e) {
-    e.stopPropagation();
-    const l = e.currentTarget;
-    letters.forEach((x) => x.classList.remove("selected"));
-    l.classList.add("selected");
-    selectedLetter = l.dataset.letter;
-    // Birthday: 7 clicks on the same letter triggers a celebration.
-    clickCounts[selectedLetter] = (clickCounts[selectedLetter] || 0) + 1;
-    if (clickCounts[selectedLetter] === 7) {
-      throwBirthday(selectedLetter);
-      // Tell peers
-      fetch(`${SYNC_BASE}/event`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ type: "click", x: 0.5, y: 0.5, from: SELF_ID }),
-        keepalive: true,
-      }).catch(() => {});
-      // (We use a generic 'click' as the trigger and then tell peers via a
-      // confetti broadcast for the global show. The local birthday is for
-      // the actor only — it's a fun secret reward.)
-      clickCounts[selectedLetter] = 0;
-    }
-  }
-  bindLetters();
-
-  // Click outside the letters: deselect.
-  document.querySelector(".stage").addEventListener("pointerdown", (e) => {
-    if (e.target.closest(".ml") || e.target.closest(".palette")) return;
-    letters.forEach((x) => x.classList.remove("selected"));
-    selectedLetter = null;
-  });
-
-  // Palette click: publish color for the selected letter (or all letters
-  // if none selected — fun default for "first time" interactions).
-  paletteButtons.forEach((b) => {
-    b.addEventListener("click", () => {
-      const color = b.dataset.color;
-      paletteButtons.forEach((x) => x.classList.toggle("active", x === b));
-      const targets = selectedLetter ? [selectedLetter] : ["M", "A", "Y", "O", "R"];
-      targets.forEach((letter) => {
-        applyLetterColor(letter, color);
-        fetch(`${SYNC_BASE}/event`, {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ type: "color", letter, color, from: SELF_ID }),
-          keepalive: true,
-        }).catch(() => {});
-      });
-      // Reset palette swatch active state after a beat — it's transient
-      setTimeout(() => paletteButtons.forEach((x) => x.classList.remove("active")), 1400);
-    });
-  });
-
-  // Modes — solid / outline / dotted / stripes. Same semantics as palette:
-  // selected letter (or all) + click a mode → broadcasts to peers.
-  const modeButtons = Array.from(document.querySelectorAll("[data-modes] button"));
-  function applyLetterMode(letter, mode, animate = true) {
-    const target = letters.find((l) => l.dataset.letter === letter);
-    if (!target) return;
-    if (animate && target.dataset.mode !== mode) {
-      // Subtle fade-through so the mode swap doesn't snap.
-      gsap.fromTo(target,
-        { opacity: 1 },
-        {
-          opacity: 0.35,
-          duration: 0.28,
-          ease: "sine.in",
-          onComplete: () => {
-            target.dataset.mode = mode;
-            gsap.to(target, { opacity: 1, duration: 0.5, ease: "sine.out" });
-          },
-        }
-      );
-    } else {
-      target.dataset.mode = mode;
-    }
-  }
-  modeButtons.forEach((b) => {
-    b.addEventListener("click", () => {
-      const mode = b.dataset.mode;
-      modeButtons.forEach((x) => x.classList.toggle("active", x === b));
-      const targets = selectedLetter ? [selectedLetter] : ["M", "A", "Y", "O", "R"];
-      targets.forEach((letter) => {
-        applyLetterMode(letter, mode);
-        fetch(`${SYNC_BASE}/event`, {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ type: "mode", letter, mode, from: SELF_ID }),
-          keepalive: true,
-        }).catch(() => {});
-      });
-      setTimeout(() => modeButtons.forEach((x) => x.classList.remove("active")), 1400);
-    });
-  });
-
-  // ── WORD: rebuild letter glyphs to match the chosen language ──────────
-  // Every glyph in the active word becomes its own <text> at a measured x,
-  // mapped cyclically to color/mode slots M-A-Y-O-R. Layout uses getBBox
-  // after a hidden render pass so non-Latin glyph widths stay accurate.
-  const SVG_NS = "http://www.w3.org/2000/svg";
-  const SLOTS = ["M", "A", "Y", "O", "R"];
-  const lettersGroup = document.getElementById("mayor-letters");
-  const backText = document.querySelector("[data-back-text]");
-  const maskText = document.querySelector("[data-mask-text]");
-
-  function rebuildWord(wordKey) {
-    const text = WORDS[wordKey] || WORDS.en;
-    document.documentElement.dataset.word = wordKey;
-    // Update halo + shine mask texts (they're single SVG text nodes).
-    if (backText) backText.textContent = text;
-    if (maskText) maskText.textContent = text;
-
-    // Tear down old letters
-    while (lettersGroup.firstChild) lettersGroup.removeChild(lettersGroup.firstChild);
-
-    // Render each glyph at x=0 first to measure width with getBBox.
-    const chars = Array.from(text);
-    const svg = lettersGroup.ownerSVGElement;
-    const measureG = document.createElementNS(SVG_NS, "g");
-    measureG.setAttribute("font-family", "Display, Arial Narrow Bold, sans-serif");
-    measureG.setAttribute("font-weight", "900");
-    measureG.setAttribute("font-size", "440");
-    measureG.setAttribute("text-anchor", "middle");
-    measureG.style.visibility = "hidden";
-    const tempNodes = chars.map((ch) => {
-      const t = document.createElementNS(SVG_NS, "text");
-      t.setAttribute("x", "0");
-      t.setAttribute("y", "380");
-      t.textContent = ch;
-      measureG.appendChild(t);
-      return t;
-    });
-    svg.appendChild(measureG);
-    const widths = tempNodes.map((t) => t.getBBox().width);
-    svg.removeChild(measureG);
-
-    // Layout: total width with small spacing, then center on x=750.
-    const gap = 16;
-    const totalW = widths.reduce((a, b) => a + b, 0) + gap * (chars.length - 1);
-    let cursor = 750 - totalW / 2;
-    chars.forEach((ch, i) => {
-      const cx = cursor + widths[i] / 2;
-      cursor += widths[i] + gap;
-      const t = document.createElementNS(SVG_NS, "text");
-      t.setAttribute("class", "ml");
-      t.setAttribute("data-letter", SLOTS[i % SLOTS.length]);
-      t.setAttribute("data-mode", "solid");
-      t.setAttribute("x", cx);
-      t.setAttribute("y", "380");
-      t.textContent = ch;
-      lettersGroup.appendChild(t);
-    });
-
-    // Re-query and re-bind the letters array.
-    letters = Array.from(document.querySelectorAll(".ml"));
-    bindLetters();
-  }
-
-  function applyWord(wordKey, animate = true) {
-    if (!WORDS[wordKey]) return;
-    if (animate && lettersGroup) {
-      gsap.to(lettersGroup, {
-        opacity: 0,
-        y: 12,
-        duration: 0.35,
-        ease: "sine.in",
-        onComplete: () => {
-          rebuildWord(wordKey);
-          gsap.fromTo(lettersGroup,
-            { opacity: 0, y: 12 },
-            { opacity: 1, y: 0, duration: 0.6, ease: "expo.out" }
-          );
-        },
-      });
-      // Halo and mask blink with the swap
-      if (backText) {
-        gsap.fromTo(backText, { opacity: 0.0 }, { opacity: 1, duration: 0.6, delay: 0.35, ease: "sine.out" });
-      }
-    } else {
-      rebuildWord(wordKey);
-    }
-  }
-
-  // Wire language buttons
-  const langButtons = Array.from(document.querySelectorAll("[data-langs] button"));
-  langButtons.forEach((b) => {
-    b.addEventListener("click", () => {
-      const word = b.dataset.word;
-      langButtons.forEach((x) => x.classList.toggle("active", x === b));
-      applyWord(word);
-      fetch(`${SYNC_BASE}/event`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ type: "word", word, from: SELF_ID }),
-        keepalive: true,
-      }).catch(() => {});
-    });
-  });
-
-  // ── VIBE: switch background palette + page CSS vars ──────────────────
-  function applyVibe(vibeKey, animate = true) {
-    const v = VIBES[vibeKey] || VIBES.default;
-    if (fieldHandle) fieldHandle.setVibe(v.deep, v.mid, v.hi);
-    const root2 = document.documentElement;
-    if (animate) {
-      gsap.to(root2, { "--y": v.y, "--k": v.k, duration: 1.2, ease: "sine.inOut" });
-    } else {
-      root2.style.setProperty("--y", v.y);
-      root2.style.setProperty("--k", v.k);
-    }
-    root2.dataset.vibe = vibeKey;
-  }
-  Array.from(document.querySelectorAll("[data-vibes] button")).forEach((b) => {
-    b.addEventListener("click", () => {
-      const vibe = b.dataset.vibe;
-      Array.from(document.querySelectorAll("[data-vibes] button")).forEach((x) => x.classList.toggle("active", x === b));
-      applyVibe(vibe);
-      fetch(`${SYNC_BASE}/event`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ type: "vibe", vibe, from: SELF_ID }),
-        keepalive: true,
-      }).catch(() => {});
-    });
-  });
-
-  // ── TEMPO: shared BPM driving cursor halo + a 3D press on letters
-  //          + a kick-drum boom synthesized via Web Audio. ─────────────
-  let tempoBpm = 60;
-  let tempoTween = null;
-  let tempoPulseInterval = null;
-  let audioCtx = null;
-  let audioEnabled = false;
-  function ensureAudio() {
-    if (audioCtx) return audioCtx;
-    try {
-      const Ctx = window.AudioContext || window.webkitAudioContext;
-      audioCtx = new Ctx();
-    } catch { audioCtx = null; }
-    return audioCtx;
-  }
-  function kick(when = 0, vibe = "default") {
-    const ctx = ensureAudio();
-    if (!ctx || !audioEnabled) return;
-    // Per-vibe kick character — pitched lower for forest/electric, higher for
-    // dawn/sunset, super crispy for mono. Burger gets a meaty wood-block clap.
-    const recipe = {
-      default:  { f0: 130, f1: 50,  d: 0.22, gain: 0.55 },
-      dawn:     { f0: 110, f1: 44,  d: 0.30, gain: 0.50 },
-      electric: { f0: 240, f1: 60,  d: 0.18, gain: 0.55 },
-      mono:     { f0: 320, f1: 80,  d: 0.12, gain: 0.42 },
-      forest:   { f0: 90,  f1: 38,  d: 0.40, gain: 0.55 },
-      sunset:   { f0: 160, f1: 52,  d: 0.26, gain: 0.50 },
-      burger:   { f0: 200, f1: 70,  d: 0.10, gain: 0.65 },
-    }[vibe] || { f0: 130, f1: 50, d: 0.22, gain: 0.55 };
-    const t0 = (when || ctx.currentTime);
-    const osc = ctx.createOscillator();
-    const g = ctx.createGain();
-    osc.type = "sine";
-    osc.frequency.setValueAtTime(recipe.f0, t0);
-    osc.frequency.exponentialRampToValueAtTime(recipe.f1, t0 + recipe.d);
-    g.gain.setValueAtTime(recipe.gain, t0);
-    g.gain.exponentialRampToValueAtTime(0.001, t0 + recipe.d);
-    osc.connect(g).connect(ctx.destination);
-    osc.start(t0);
-    osc.stop(t0 + recipe.d + 0.02);
-  }
-  function pressLetters() {
-    if (reduced || !letters.length) return;
-    // One tween, all letters as targets — much cheaper than per-letter loop.
-    gsap.fromTo(letters,
-      { z: 0 },
-      { z: -16, duration: 0.06, ease: "power2.out", overwrite: "auto" }
+    gsap.fromTo(".hero",
+      { scale: 1 },
+      { scale: 1.12, duration: 0.45, ease: "power2.out" }
     );
-    gsap.to(letters, { z: 0, duration: 0.5, ease: E.bounce, delay: 0.06, overwrite: "auto" });
+    gsap.to(".hero", { scale: 1, duration: 1.6, ease: "elastic.out(1, 0.6)", delay: 0.45 });
   }
-  function applyTempo(bpm, animate = true) {
-    tempoBpm = Math.max(30, Math.min(180, bpm | 0));
-    const slider = document.querySelector("[data-tempo]");
-    const bpmEl = document.querySelector("[data-tempo-bpm]");
-    if (slider && Number(slider.value) !== tempoBpm) slider.value = String(tempoBpm);
-    if (bpmEl) bpmEl.textContent = String(tempoBpm);
-    if (tempoTween) tempoTween.kill();
-    if (tempoPulseInterval) { clearInterval(tempoPulseInterval); tempoPulseInterval = null; }
-    if (reduced) return;
-    const period = 60 / tempoBpm;
-    if (halo) {
-      tempoTween = gsap.to(halo, {
-        scale: 1.25,
-        duration: period * 0.5,
-        ease: "sine.inOut",
-        yoyo: true,
-        repeat: -1,
-      });
-    }
-    // Synced beat — letters press + kick boom on every beat.
-    tempoPulseInterval = setInterval(() => {
-      pressLetters();
-      const vibe = document.documentElement.dataset.vibe || "default";
-      kick(0, document.documentElement.dataset.word === "bk" ? "burger" : vibe);
-    }, period * 1000);
-  }
-  const tempoSlider = document.querySelector("[data-tempo]");
-  if (tempoSlider) {
-    let raf = 0;
-    tempoSlider.addEventListener("input", (e) => {
-      const v = Number(e.target.value);
-      applyTempo(v, false);
-      // Throttle the publish so we don't spam the server while dragging
-      if (raf) return;
-      raf = setTimeout(() => {
-        fetch(`${SYNC_BASE}/event`, {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ type: "tempo", tempo: tempoBpm, from: SELF_ID }),
-          keepalive: true,
-        }).catch(() => {});
-        raf = 0;
-      }, 120);
-    });
-  }
-  applyTempo(60, false);
 
-  // ── CONFETTI: chaotic, multi-color, rains across the screen ───────────
-  function rainConfetti(opts = {}) {
-    if (reduced || !sparksLayer) return;
-    const count = opts.count ?? 80;
-    const colors = ["#f0d72a", "#ffffff", "#ff8a3d", "#7dd3fc", "#a78bfa", "#34d399", "#f472b6", "#fb7185"];
-    for (let i = 0; i < count; i++) {
-      const el = document.createElement("div");
-      el.className = "confetti";
-      const color = colors[Math.floor(Math.random() * colors.length)];
-      const size = 6 + Math.random() * 10;
-      el.style.width = `${size}px`;
-      el.style.height = `${size * 0.5}px`;
-      el.style.background = color;
-      el.style.boxShadow = `0 0 12px ${color}`;
-      const startX = Math.random() * window.innerWidth;
-      el.style.left = `${startX}px`;
-      el.style.top = `-30px`;
-      el.style.transform = `rotate(${Math.random() * 360}deg)`;
-      sparksLayer.appendChild(el);
-      const driftX = (Math.random() - 0.5) * 220;
-      const fallY = window.innerHeight + 80;
-      const dur = 1.6 + Math.random() * 1.6;
-      gsap.to(el, {
-        x: driftX,
-        y: fallY,
-        rotation: `+=${(Math.random() - 0.5) * 720}`,
-        duration: dur,
-        ease: "sine.in",
-        delay: Math.random() * 0.4,
-      });
-      gsap.to(el, {
-        opacity: 0,
-        duration: 0.5,
-        delay: dur - 0.3,
-        onComplete: () => el.remove(),
+  // ── CLICK: ripple + note. The single most important interaction. ──
+  function fireClick(clientX, clientY, isSelf = true) {
+    const nx = clientX / window.innerWidth;
+    const ny = clientY / window.innerHeight;
+
+    // Visual ripple — both on the field shader (background pulse) and as a
+    // crisp ring on the foreground.
+    if (fieldHandle) fieldHandle.triggerPulse(nx, 1 - ny);
+    if (ripplesHandle) ripplesHandle.add(clientX, clientY, isSelf);
+
+    // Note — pentatonic by X; soft when remote, brighter when self.
+    if (soundOn && pluckSynth) {
+      const note = noteForX(nx);
+      pluck(note, 0, isSelf ? 0.75 : 0.45);
+    }
+
+    // Letters bow toward the click — tiny tilt that decays.
+    if (!reduced) {
+      letters.forEach((l, i) => {
+        const lx = (i + 0.5) / letters.length;
+        const dist = Math.abs(lx - nx);
+        const push = (1 - Math.min(1, dist * 2.5)) * (isSelf ? 14 : 8);
+        gsap.fromTo(l,
+          { y: 0 },
+          { y: -push, duration: 0.18, ease: "power2.out", overwrite: "auto" }
+        );
+        gsap.to(l, { y: 0, duration: 1.2, ease: "elastic.out(1, 0.6)", delay: 0.18, overwrite: "auto" });
       });
     }
+
+    if (isSelf && firstClick) {
+      firstClick = false;
+      scaleShock();
+    }
   }
-  document.querySelector("[data-confetti]")?.addEventListener("click", () => {
-    rainConfetti();
+
+  // Local click — fan out to peers + render locally.
+  function onStageClick(e) {
+    if (e.target.closest("a, .sound")) return;
+    fireClick(e.clientX, e.clientY, true);
     fetch(`${SYNC_BASE}/event`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ type: "confetti", from: SELF_ID }),
+      body: JSON.stringify({
+        type: "click",
+        x: e.clientX / window.innerWidth,
+        y: e.clientY / window.innerHeight,
+        from: SELF_ID,
+      }),
       keepalive: true,
     }).catch(() => {});
+  }
+  document.querySelector(".stage").addEventListener("click", onStageClick);
+  // Letters click: same handler, but they catch the event first so we stop propagation.
+  letters.forEach((l) => {
+    l.addEventListener("click", (e) => {
+      e.stopPropagation();
+      onStageClick(e);
+    });
   });
 
-  // ── SOUND TOGGLE: enables the tempo kick ──────────────────────────────
-  // Local-only — audio context requires user gesture, peers each enable
-  // their own. Once enabled, every tempo beat fires a synthesized kick.
-  const soundBtn = document.querySelector("[data-sound]");
-  if (soundBtn) {
-    soundBtn.addEventListener("click", () => {
-      audioEnabled = !audioEnabled;
-      const ctx = ensureAudio();
-      if (audioEnabled && ctx && ctx.state === "suspended") ctx.resume();
-      soundBtn.textContent = audioEnabled ? "🔊 sound" : "🔇 sound";
-      // Quick demo kick so user knows it's on
-      if (audioEnabled) kick();
-    });
-  }
-
-  // ── LAMP: light/dark mode toggle, synced to peers ────────────────────
-  let lampOn = false;
-  function applyLamp(on) {
-    lampOn = !!on;
-    document.documentElement.classList.toggle("lamp-on", lampOn);
-  }
-  document.querySelector("[data-lamp]")?.addEventListener("click", () => {
-    applyLamp(!lampOn);
-    fetch(`${SYNC_BASE}/event`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ type: "lamp", on: lampOn, from: SELF_ID }),
-      keepalive: true,
-    }).catch(() => {});
-  });
-
-  // ── BIRTHDAY: 7 clicks on a letter → other 4 sing happy birthday ─────
-  function throwBirthday(birthdayLetter) {
-    if (reduced) return;
-    const others = letters.filter((l) => l.dataset.letter !== birthdayLetter);
-    // Other letters do a sequential bow-and-jump
-    others.forEach((l, i) => {
-      gsap.timeline()
-        .to(l, { y: -20, scale: 1.15, duration: 0.3, ease: "back.out(2)", delay: i * 0.12 })
-        .to(l, { y: 0,   scale: 1,    duration: 0.7, ease: E.bounce });
-    });
-    // Cake emoji floats up from below the birthday letter
-    const target = letters.find((l) => l.dataset.letter === birthdayLetter);
-    if (target && sparksLayer) {
-      const r = target.getBoundingClientRect();
-      const cake = document.createElement("div");
-      cake.textContent = "🎂";
-      cake.style.position = "fixed";
-      cake.style.left = `${r.left + r.width / 2}px`;
-      cake.style.top = `${r.top + r.height + 20}px`;
-      cake.style.transform = "translate(-50%,-50%) scale(0)";
-      cake.style.fontSize = "64px";
-      cake.style.zIndex = "20";
-      cake.style.pointerEvents = "none";
-      cake.style.filter = "drop-shadow(0 8px 24px rgba(0,0,0,0.6))";
-      sparksLayer.appendChild(cake);
-      gsap.fromTo(cake,
-        { scale: 0, opacity: 0 },
-        { scale: 1.4, opacity: 1, duration: 0.5, ease: "back.out(2)" }
-      );
-      gsap.to(cake, {
-        y: -240,
-        scale: 1,
-        opacity: 0,
-        duration: 2.6,
-        delay: 0.5,
-        ease: "power2.out",
-        onComplete: () => cake.remove(),
-      });
-    }
-    // Confetti for ambience
-    rainConfetti({ count: 40 });
-  }
-
-  // Open SSE connection for incoming events.
+  // ── PRESENCE / SYNC via SSE ──
   let es = null;
   function connectSync() {
     if (reduced) return;
@@ -1106,76 +535,29 @@ export function initMotion(gsap) {
         try {
           const ev = JSON.parse(msg.data);
           if (ev.type === "presence") {
-            updatePresence(ev.count);
-            return;
-          }
-          if (ev.type === "colors") {
-            for (const [letter, color] of Object.entries(ev.colors || {})) {
-              applyLetterColor(letter, color, false);
+            if (presenceEl) {
+              const n = ev.count || 1;
+              presenceEl.textContent = n === 1 ? "alone in the room" : `${n} in the room`;
             }
+            if (starsHandle) starsHandle.setCount(ev.count || 1);
             return;
           }
-          if (ev.type === "modes") {
-            for (const [letter, mode] of Object.entries(ev.modes || {})) {
-              applyLetterMode(letter, mode, false);
-            }
-            return;
-          }
-          if (ev.type === "word") {
-            applyWord(ev.word, true);
-            // Mark the active language button (if it exists)
-            langButtons.forEach((x) => x.classList.toggle("active", x.dataset.word === ev.word));
-            return;
-          }
-          if (ev.type === "vibe") {
-            applyVibe(ev.vibe, true);
-            Array.from(document.querySelectorAll("[data-vibes] button"))
-              .forEach((x) => x.classList.toggle("active", x.dataset.vibe === ev.vibe));
-            return;
-          }
-          if (ev.type === "tempo") {
-            applyTempo(ev.tempo, false);
-            return;
-          }
-          if (ev.type === "confetti") {
-            rainConfetti();
-            return;
-          }
-          if (ev.type === "lamp") {
-            applyLamp(ev.on);
-            return;
-          }
-          // Ignore our own echoes
           if (ev.from === SELF_ID) return;
-          if (ev.type === "color") {
-            applyLetterColor(ev.letter, ev.color);
-            const target = letters.find((l) => l.dataset.letter === ev.letter);
-            if (target) {
-              gsap.fromTo(target, { y: 0 }, { y: -8, duration: 0.3, ease: "back.out(2)" });
-              gsap.to(target, { y: 0, duration: 0.9, ease: E.bounce, delay: 0.3 });
-            }
-            return;
-          }
-          if (ev.type === "mode") {
-            applyLetterMode(ev.letter, ev.mode);
-            const target = letters.find((l) => l.dataset.letter === ev.letter);
-            if (target) {
-              gsap.fromTo(target, { y: 0 }, { y: -6, duration: 0.3, ease: "back.out(2)" });
-              gsap.to(target, { y: 0, duration: 0.9, ease: E.bounce, delay: 0.3 });
-            }
-            return;
-          }
           if (ev.type === "click" || ev.type === "tab") {
-            ghostRipple(ev.x ?? 0.5, ev.y ?? 0.5);
+            const x = (ev.x ?? 0.5) * window.innerWidth;
+            const y = (ev.y ?? 0.5) * window.innerHeight;
+            fireClick(x, y, false);
           } else if (ev.type === "wave") {
-            // Real email arrival — bigger reaction.
-            ghostRipple(ev.x ?? 0.5, ev.y ?? 0.18);
-            delightLetter({ count: 14 });
+            // Real email arrival — full-screen-center ripple + a deeper note.
+            const x = (ev.x ?? 0.5) * window.innerWidth;
+            const y = (ev.y ?? 0.18) * window.innerHeight;
+            fireClick(x, y, false);
+            // Lower bell note for email arrival
+            if (soundOn && pluckSynth) pluck("A2", 0, 0.6);
           }
         } catch {}
       };
       es.onerror = () => {
-        // Auto-reconnect with backoff
         if (es) { try { es.close(); } catch {} es = null; }
         setTimeout(connectSync, 4000);
       };
@@ -1185,127 +567,37 @@ export function initMotion(gsap) {
   }
   connectSync();
 
-  if (!reduced) {
-    document.querySelector(".stage").addEventListener("click", (e) => {
-      if (e.target.closest("a")) return;
-      shockwave(e);
-      publishEvent("click", e);
-    });
-    window.addEventListener("keydown", (e) => {
-      if (e.key === " " || e.code === "Space") {
-        e.preventDefault();
-        const fakeE = { clientX: window.innerWidth / 2, clientY: window.innerHeight / 2 };
-        shockwave(fakeE);
-        publishEvent("click", fakeE);
-      }
-    });
-  }
-
-  // ── TAB-RETURN ──
-  if (!reduced) {
-    let hiddenAt = 0;
-    document.addEventListener("visibilitychange", () => {
-      if (document.hidden) { hiddenAt = Date.now(); return; }
-      if (hiddenAt && Date.now() - hiddenAt > 600) delightLetter({ count: 12 });
-      hiddenAt = 0;
-    });
-  }
-
-  // ── SIGNAL ENGINE ──
+  // ── STATS poll for field intensity (subtle background warmth) ──
   let lastStats = null;
-
-  function easedNum(el, to, dur = 1.4) {
-    if (!el) return;
-    const from = Number(el.getAttribute("data-current") || el.textContent) || 0;
-    const target = Number(to) || 0;
-    if (from === target) return;
-    const proxy = { v: from };
-    gsap.to(proxy, {
-      v: target, duration: dur, ease: E.inOut,
-      onUpdate: () => { el.textContent = String(Math.round(proxy.v)); },
-      onComplete: () => el.setAttribute("data-current", String(target)),
-    });
-  }
-
-  function fmtAge(s) {
-    if (s == null) return "—";
-    if (s < 60) return `${s}s ago`;
-    if (s < 3600) return `${Math.round(s / 60)}m ago`;
-    return `${Math.round(s / 3600)}h ago`;
-  }
-
-  function applyStats(s) {
-    const sessions = s.sessions_today || 0;
-    const citizens = s.citizens || 0;
-    const active = s.active_sessions || 0;
-
-    // Top-left chip: switches between citizens/active depending on what's happening.
-    if (active > 0) {
-      easedNum(statNum, active);
-      if (statLab) statLab.textContent = "active";
-    } else {
-      easedNum(statNum, citizens);
-      if (statLab) statLab.textContent = citizens === 1 ? "citizen" : "citizens";
-    }
-
-    // Tagline second slot — last received age
-    if (tagstat) tagstat.textContent = `last received · ${fmtAge(s.last_email_age_seconds)}`;
-
-    // Field + stream intensity
-    const pulse = Number(s.recent_pulse || 0);
-    const ageScore = (() => {
-      const a = s.last_email_age_seconds;
-      if (a == null) return 0;
-      if (a < 60) return 1;
-      if (a < 300) return 0.6;
-      if (a < 1800) return 0.3;
-      return 0.05;
-    })();
-    const activeScore = Math.min(1, active / 3);
-    const intensity = Math.min(1, 0.45 * pulse + 0.35 * activeScore + 0.20 * ageScore);
-    if (fieldHandle) fieldHandle.setIntensity(intensity);
-    streamDensity = 8 + Math.round(intensity * 35);
-
-    // Events
-    if (lastStats) {
-      const newSession = sessions > (lastStats.sessions_today || 0);
-      const newCitizen = citizens > (lastStats.citizens || 0);
-      if (newSession) {
-        delightLetter({ count: 14 });
-        if (fieldHandle) fieldHandle.triggerPulse(0.5, 0.2);
-      }
-      if (newCitizen) {
-        letters.forEach((l, i) => setTimeout(() => delightLetter({ letter: l, count: 9 }), i * 90));
-        if (fieldHandle) fieldHandle.triggerPulse(0.5, 0.5);
-      }
-    }
-    lastStats = s;
-  }
-
   async function pollStats() {
     try {
-      const res = await fetch(STATS_URL, { cache: "no-cache" });
+      const res = await fetch("/api/stats", { cache: "no-cache" });
       if (!res.ok) throw new Error("stats");
-      applyStats(await res.json());
-    } catch {
-      applyStats({
-        online: false,
-        citizens: lastStats?.citizens || 0,
-        sessions_today: lastStats?.sessions_today || 0,
-        sessions_this_hour: 0,
-        last_email_age_seconds: null,
-        active_sessions: 0,
-        recent_pulse: 0,
-      });
-    }
+      const s = await res.json();
+      const pulse = Number(s.recent_pulse || 0);
+      const ageScore = (() => {
+        const a = s.last_email_age_seconds;
+        if (a == null) return 0;
+        if (a < 60) return 1;
+        if (a < 300) return 0.5;
+        if (a < 1800) return 0.25;
+        return 0.05;
+      })();
+      const activeScore = Math.min(1, (s.active_sessions || 0) / 3);
+      const intensity = Math.min(1, 0.45 * pulse + 0.35 * activeScore + 0.20 * ageScore);
+      if (fieldHandle) fieldHandle.setIntensity(intensity);
+      lastStats = s;
+    } catch {}
   }
   pollStats();
-  const pollInterval = setInterval(pollStats, POLL_MS);
+  const pollInterval = setInterval(pollStats, 5000);
 
+  // ── CLEANUP ──
   const onPageHide = () => {
     clearInterval(pollInterval);
     if (fieldHandle) fieldHandle.destroy();
-    if (streamHandle) streamHandle.destroy();
+    if (starsHandle) starsHandle.destroy();
+    if (ripplesHandle) ripplesHandle.destroy();
     if (es) { try { es.close(); } catch {} }
     gsap.killTweensOf("*");
   };
@@ -1314,7 +606,8 @@ export function initMotion(gsap) {
     destroy: () => {
       clearInterval(pollInterval);
       if (fieldHandle) fieldHandle.destroy();
-      if (streamHandle) streamHandle.destroy();
+      if (starsHandle) starsHandle.destroy();
+      if (ripplesHandle) ripplesHandle.destroy();
       if (es) { try { es.close(); } catch {} }
       window.removeEventListener("pagehide", onPageHide);
       gsap.killTweensOf("*");
