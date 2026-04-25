@@ -42,6 +42,7 @@ const WORDS = {
   ko: "시장",
   el: "ΔΉΜΑΡΧΟΣ",
   he: "ראש",
+  bk: "BURGER", // 👑 the burgdom
 };
 
 // ── VIBES: background & palette themes ─────────────────────────────────
@@ -452,9 +453,18 @@ export function initMotion(gsap) {
       if (fieldHandle) fieldHandle.setMouse(e.clientX / window.innerWidth, 1 - e.clientY / window.innerHeight);
       const nx = e.clientX / window.innerWidth - 0.5;
       const ny = e.clientY / window.innerHeight - 0.5;
-      gsap.to(layers.back, { x: nx * 18, y: ny * 10, duration: 1.4, ease: "power3.out" });
-      gsap.to(layers.mid,  { x: nx * -8, y: ny * -4, duration: 1.0, ease: "power3.out" });
-      gsap.to(layers.shine,{ x: nx * 22, y: ny * 12, duration: 0.8, ease: "power3.out" });
+      // Real 3D rotation: letters tilt with cursor like a sculpted slab.
+      // 12° max yaw, 8° max pitch — enough to feel sculptural, not jarring.
+      gsap.to(".hero", {
+        rotationY: nx * 12,
+        rotationX: -ny * 8,
+        duration: 1.2,
+        ease: "power3.out",
+        transformPerspective: 1400,
+      });
+      gsap.to(layers.back, { x: nx * 28, y: ny * 16, z: -40, duration: 1.4, ease: "power3.out" });
+      gsap.to(layers.mid,  { x: nx * -6, y: ny * -3, z: 20,  duration: 1.0, ease: "power3.out" });
+      gsap.to(layers.shine,{ x: nx * 36, y: ny * 22, z: 60,  duration: 0.8, ease: "power3.out" });
     }, { passive: true });
 
     document.querySelectorAll(".chip, .cta").forEach((el) => {
@@ -724,6 +734,7 @@ export function initMotion(gsap) {
 
   function rebuildWord(wordKey) {
     const text = WORDS[wordKey] || WORDS.en;
+    document.documentElement.dataset.word = wordKey;
     // Update halo + shine mask texts (they're single SVG text nodes).
     if (backText) backText.textContent = text;
     if (maskText) maskText.textContent = text;
@@ -842,10 +853,58 @@ export function initMotion(gsap) {
     });
   });
 
-  // ── TEMPO: shared BPM that drives the page heartbeat ─────────────────
-  // The cursor halo, status pin, and an idle letter pulse all sync to it.
+  // ── TEMPO: shared BPM driving cursor halo + a 3D press on letters
+  //          + a kick-drum boom synthesized via Web Audio. ─────────────
   let tempoBpm = 60;
   let tempoTween = null;
+  let tempoPulseInterval = null;
+  let audioCtx = null;
+  let audioEnabled = false;
+  function ensureAudio() {
+    if (audioCtx) return audioCtx;
+    try {
+      const Ctx = window.AudioContext || window.webkitAudioContext;
+      audioCtx = new Ctx();
+    } catch { audioCtx = null; }
+    return audioCtx;
+  }
+  function kick(when = 0, vibe = "default") {
+    const ctx = ensureAudio();
+    if (!ctx || !audioEnabled) return;
+    // Per-vibe kick character — pitched lower for forest/electric, higher for
+    // dawn/sunset, super crispy for mono. Burger gets a meaty wood-block clap.
+    const recipe = {
+      default:  { f0: 130, f1: 50,  d: 0.22, gain: 0.55 },
+      dawn:     { f0: 110, f1: 44,  d: 0.30, gain: 0.50 },
+      electric: { f0: 240, f1: 60,  d: 0.18, gain: 0.55 },
+      mono:     { f0: 320, f1: 80,  d: 0.12, gain: 0.42 },
+      forest:   { f0: 90,  f1: 38,  d: 0.40, gain: 0.55 },
+      sunset:   { f0: 160, f1: 52,  d: 0.26, gain: 0.50 },
+      burger:   { f0: 200, f1: 70,  d: 0.10, gain: 0.65 },
+    }[vibe] || { f0: 130, f1: 50, d: 0.22, gain: 0.55 };
+    const t0 = (when || ctx.currentTime);
+    const osc = ctx.createOscillator();
+    const g = ctx.createGain();
+    osc.type = "sine";
+    osc.frequency.setValueAtTime(recipe.f0, t0);
+    osc.frequency.exponentialRampToValueAtTime(recipe.f1, t0 + recipe.d);
+    g.gain.setValueAtTime(recipe.gain, t0);
+    g.gain.exponentialRampToValueAtTime(0.001, t0 + recipe.d);
+    osc.connect(g).connect(ctx.destination);
+    osc.start(t0);
+    osc.stop(t0 + recipe.d + 0.02);
+  }
+  function pressLetters() {
+    if (reduced || !letters.length) return;
+    // Each beat: letters punch back in Z briefly, then spring forward.
+    letters.forEach((l, i) => {
+      gsap.fromTo(l,
+        { z: 0 },
+        { z: -22, duration: 0.06, ease: "power2.out", delay: i * 0.012 }
+      );
+      gsap.to(l, { z: 0, duration: 0.6, ease: E.bounce, delay: i * 0.012 + 0.06 });
+    });
+  }
   function applyTempo(bpm, animate = true) {
     tempoBpm = Math.max(30, Math.min(180, bpm | 0));
     const slider = document.querySelector("[data-tempo]");
@@ -853,15 +912,24 @@ export function initMotion(gsap) {
     if (slider && Number(slider.value) !== tempoBpm) slider.value = String(tempoBpm);
     if (bpmEl) bpmEl.textContent = String(tempoBpm);
     if (tempoTween) tempoTween.kill();
-    if (reduced || !halo) return;
+    if (tempoPulseInterval) { clearInterval(tempoPulseInterval); tempoPulseInterval = null; }
+    if (reduced) return;
     const period = 60 / tempoBpm;
-    tempoTween = gsap.to(halo, {
-      scale: 1.25,
-      duration: period * 0.5,
-      ease: "sine.inOut",
-      yoyo: true,
-      repeat: -1,
-    });
+    if (halo) {
+      tempoTween = gsap.to(halo, {
+        scale: 1.25,
+        duration: period * 0.5,
+        ease: "sine.inOut",
+        yoyo: true,
+        repeat: -1,
+      });
+    }
+    // Synced beat — letters press + kick boom on every beat.
+    tempoPulseInterval = setInterval(() => {
+      pressLetters();
+      const vibe = document.documentElement.dataset.vibe || "default";
+      kick(0, document.documentElement.dataset.word === "bk" ? "burger" : vibe);
+    }, period * 1000);
   }
   const tempoSlider = document.querySelector("[data-tempo]");
   if (tempoSlider) {
@@ -931,6 +999,21 @@ export function initMotion(gsap) {
       keepalive: true,
     }).catch(() => {});
   });
+
+  // ── SOUND TOGGLE: enables the tempo kick ──────────────────────────────
+  // Local-only — audio context requires user gesture, peers each enable
+  // their own. Once enabled, every tempo beat fires a synthesized kick.
+  const soundBtn = document.querySelector("[data-sound]");
+  if (soundBtn) {
+    soundBtn.addEventListener("click", () => {
+      audioEnabled = !audioEnabled;
+      const ctx = ensureAudio();
+      if (audioEnabled && ctx && ctx.state === "suspended") ctx.resume();
+      soundBtn.textContent = audioEnabled ? "🔊 sound" : "🔇 sound";
+      // Quick demo kick so user knows it's on
+      if (audioEnabled) kick();
+    });
+  }
 
   // ── LAMP: light/dark mode toggle, synced to peers ────────────────────
   let lampOn = false;
