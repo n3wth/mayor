@@ -1,1 +1,9 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect width="32" height="32" fill="#f2e437"/><text x="16" y="25" font-family="Arial Narrow, sans-serif" font-weight="900" font-size="28" text-anchor="middle" fill="#0a0a0a">M</text></svg>
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
+<rect width="64" height="64" rx="11.52" fill="#08090b"/>
+<g stroke="#f2f3f5" stroke-width="3.52" fill="none" stroke-linecap="square">
+  <path d="M20.48 10.24 H10.24 V53.76 H20.48"/>
+  <path d="M43.519999999999996 10.24 H53.76 V53.76 H43.519999999999996"/>
+  <path d="M23.68 40.96 V26.88 h7.68 q3.84 0 3.84 4.48 V40.96" stroke-width="2.992"/>
+</g>
+<circle cx="42.24" cy="39.68" r="4.48" fill="#E8A04A"/>
+</svg>

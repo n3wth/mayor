@@ -1,15 +1,25 @@
 # mayor
 
-Personal landing page for [mayor.wtf](https://mayor.wtf) and [mayor.pm](https://mayor.pm).
+Office of the Mayor. Static landing pages and the mail plumbing behind `um@mayor.wtf`.
 
-Static HTML, CSS, and a small GSAP motion module. Deployed on Vercel.
+## Sites
+
+- [mayor.wtf](https://mayor.wtf) — primary deployment
+- [mayor.pm](https://mayor.pm) — mirror deployment, identical content
 
 ## Structure
 
-- `apps/mayor-wtf` — primary deployment (mayor.wtf)
-- `apps/mayor-pm` — mirror deployment (mayor.pm), identical content
+```
+apps/
+  mayor-wtf      static site (mayor.wtf) + Vercel api/ (inbox, stats)
+  mayor-pm       mirror site (mayor.pm), same source
+  email-worker   Cloudflare Email Worker — parses inbound MIME
+  inbox-server   mini adapter — receives mail and dispatches to gastown
+```
 
-Both apps share the same source.
+The two sites share the same flat duotone build: static HTML, CSS, and a small GSAP
+motion module, deployed on Vercel. `email-worker` and `inbox-server` carry mail from
+Cloudflare Email Routing through to the responder on the mini.
 
 ## Local development
 
