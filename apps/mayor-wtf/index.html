@@ -3,9 +3,9 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>mayor.wtf</title>
-<meta name="description" content="The Office of The Mayor.">
-<meta name="theme-color" content="#000000">
+<title>mayor.wtf — office of the mayor</title>
+<meta name="description" content="The Office of the Mayor. A small municipal authority for a town that mostly runs itself.">
+<meta name="theme-color" content="#EFE9DC">
 
 <link rel="icon" type="image/svg+xml" href="/favicon.svg">
 <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png">
@@ -14,455 +14,555 @@
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://mayor.wtf">
 <meta property="og:title" content="mayor.wtf">
-<meta property="og:description" content="The Office of The Mayor.">
+<meta property="og:description" content="Office of the Mayor.">
 <meta property="og:image" content="https://mayor.wtf/og.png">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
 
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="mayor.wtf">
-<meta name="twitter:description" content="The Office of The Mayor.">
+<meta name="twitter:description" content="Office of the Mayor.">
 <meta name="twitter:image" content="https://mayor.wtf/og.png">
 
-<link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
-<link rel="stylesheet" href="/fonts.css">
+<link rel="preconnect" href="https://rsms.me/">
+<link rel="stylesheet" href="https://rsms.me/inter/inter.css">
 <style>
+  /*
+    mayor.wtf — duotone build
+    Two colors, one accent. No gradients. No shadows. No glow.
+    Reference: Teenage Engineering OP-1, Swiss broadside, municipal stationery.
+  */
+
   :root {
-    --y: #f0d72a;
-    --y-warm: #ffd54a;
-    --k: #050505;
-    --w: #ffffff;
-    --display: "Display", "Arial Narrow Bold", "Arial Narrow", sans-serif;
-    --mono: "Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
-    --sans: "Sans", ui-sans-serif, system-ui, -apple-system, sans-serif;
+    --paper: #EFE9DC;        /* OP-1 cream */
+    --ink:   #0A0A0A;        /* near-black */
+    --ink-2: #1F1F1F;        /* secondary ink, no opacity tricks */
+    --rule:  #0A0A0A;
+    --accent:#FF5F1F;        /* mayor orange — used only for live state */
+    --mono:  ui-monospace, "JetBrains Mono", "IBM Plex Mono", Menlo, Consolas, monospace;
+    --sans:  "Inter", system-ui, -apple-system, "Helvetica Neue", Arial, sans-serif;
+    --frame: 18px;
+    --gap:   18px;
   }
+  @supports (font-variation-settings: normal) {
+    :root { --sans: "Inter var", system-ui, sans-serif; }
+  }
+
   *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
-  html, body { height: 100%; background: var(--k); color: var(--w); overflow: hidden; }
+
+  html { background: var(--paper); }
   body {
+    background: var(--paper);
+    color: var(--ink);
     font-family: var(--sans);
+    font-feature-settings: "ss01", "ss02", "cv11", "tnum";
     -webkit-font-smoothing: antialiased;
-    cursor: none;
+    text-rendering: optimizeLegibility;
+    line-height: 1.4;
+    min-height: 100vh;
+    padding: var(--frame);
   }
 
-  .stage { position: fixed; inset: 0; overflow: hidden; }
-
-  /* Volumetric yellow field — the room's atmosphere. */
-  .field { position: absolute; inset: 0; z-index: 0; pointer-events: none; }
-  .field canvas { display: block; width: 100%; height: 100%; }
-
-  /* Soft top vignette so chrome reads. */
-  .wash {
-    position: absolute; inset: 0; z-index: 1; pointer-events: none;
-    background:
-      radial-gradient(120% 60% at 50% 0%, rgba(0,0,0,0) 0%, rgba(0,0,0,0.55) 70%, rgba(0,0,0,0.85) 100%),
-      radial-gradient(70% 50% at 50% 50%, rgba(0,0,0,0) 30%, rgba(0,0,0,0.45) 100%);
-  }
-
-  /* Aurora curtains — slow vertical yellow gauze ribbons drifting downward.
-     Sits between .wash (z:1) and .stars (z:2). DOM order after .wash so it
-     paints over the vignette but below the stars. */
-  .aurora { position: absolute; inset: 0; z-index: 1; pointer-events: none; }
-  .aurora canvas { display: block; width: 100%; height: 100%; mix-blend-mode: screen; }
-
-  /* Presence stars — soft drifting points of light, one per visitor. */
-  .stars { position: absolute; inset: 0; z-index: 2; pointer-events: none; }
-  .stars canvas { display: block; width: 100%; height: 100%; }
-
-  /* Hero MAYOR — yellow on black, breathing, weighty. */
-  .hero {
-    position: absolute;
-    inset: 0;
+  /* Outer ledger frame — a hard 1px municipal border. */
+  .ledger {
+    border: 1px solid var(--rule);
+    min-height: calc(100vh - var(--frame) * 2);
     display: grid;
-    place-items: center;
-    z-index: 4;
-    pointer-events: none;
-    perspective: 1600px;
-    perspective-origin: 50% 50%;
+    grid-template-rows: auto 1fr auto;
   }
-  .hero .layer {
-    position: absolute;
-    inset: 0;
+
+  /* ---------- Masthead ---------- */
+  .masthead {
     display: grid;
-    place-items: center;
-    will-change: transform;
-    transform-style: preserve-3d;
-  }
-  .ml { transform-box: fill-box; transform-origin: 50% 60%; will-change: transform; cursor: pointer; pointer-events: auto; }
-  .hero svg { width: min(96vw, 1500px); height: auto; overflow: visible; }
-  .hero .layer text {
-    font-family: var(--display);
-    font-weight: 900;
-    text-anchor: middle;
-    letter-spacing: -0.04em;
-  }
-  .hero .layer.back text {
-    fill: var(--y-warm);
-    filter: blur(40px);
-    opacity: 0.45;
-  }
-  .hero .layer.mid text { fill: var(--y); }
-  .hero .layer.mid svg {
-    filter:
-      drop-shadow(0px 4px 0 rgba(0,0,0,0.35))
-      drop-shadow(0px 26px 36px rgba(0,0,0,0.55));
-  }
-
-  /* Cursor trail — soft yellow particles drifting behind the pointer. */
-  .trail { position: absolute; inset: 0; z-index: 2; pointer-events: none; }
-  .trail canvas { display: block; width: 100%; height: 100%; }
-
-  /* Note ripples (synced) — concentric expanding rings drawn on click anywhere. */
-  .ripples { position: absolute; inset: 0; z-index: 3; pointer-events: none; }
-  .ripples canvas { display: block; width: 100%; height: 100%; }
-
-  /* Cursor */
-  .cursor-halo, .cursor-dot {
-    position: fixed;
-    top: 0; left: 0;
-    pointer-events: none;
-    z-index: 50;
-    transform: translate3d(-100px, -100px, 0);
-    will-change: transform;
-  }
-  .cursor-halo {
-    width: 60px; height: 60px;
-    margin: -30px 0 0 -30px;
-    border-radius: 50%;
-    background: radial-gradient(circle, rgba(240,215,42,0.32) 0%, rgba(240,215,42,0) 70%);
-    mix-blend-mode: screen;
-  }
-  .cursor-dot {
-    width: 4px; height: 4px;
-    margin: -2px 0 0 -2px;
-    border-radius: 50%;
-    background: rgba(255,255,255,0.95);
-  }
-
-  /* Two corners only — domain & link. Implicit. */
-  .corner {
-    position: absolute;
-    z-index: 12;
-    pointer-events: auto;
+    grid-template-columns: 1fr auto 1fr;
+    align-items: center;
+    border-bottom: 1px solid var(--rule);
+    padding: 14px 22px;
     font-family: var(--mono);
-    font-size: clamp(10px, 0.95vw, 11.5px);
-    letter-spacing: 0.16em;
+    font-size: 11px;
+    letter-spacing: 0.12em;
     text-transform: uppercase;
-    color: rgba(255,255,255,0.55);
   }
-  .corner.tl { top: clamp(20px, 3vw, 28px); left: clamp(22px, 3vw, 32px); }
-  .corner.tr { top: clamp(20px, 3vw, 28px); right: clamp(22px, 3vw, 32px); }
-  .corner.bl { bottom: clamp(22px, 3vw, 30px); left: clamp(22px, 3vw, 32px); }
-  .corner.br { bottom: clamp(22px, 3vw, 30px); right: clamp(22px, 3vw, 32px); }
-  .corner a { color: rgba(255,255,255,0.65); text-decoration: none; transition: color .25s ease; }
-  .corner a:hover { color: var(--w); }
-  .corner .live {
-    display: inline-block;
-    width: 6px; height: 6px;
-    border-radius: 50%;
-    background: var(--y);
-    box-shadow: 0 0 8px var(--y);
-    margin-right: 8px;
-    vertical-align: 0;
-    animation: blink 2.6s ease-in-out infinite;
-  }
-  @keyframes blink {
-    0%, 100% { opacity: 1; }
-    50% { opacity: 0.3; }
-  }
-
-  /* CTA — the only call to action. Quiet, in glass. */
-  .cta {
-    position: absolute;
-    left: 50%;
-    bottom: clamp(38px, 6vh, 64px);
-    transform: translateX(-50%);
-    z-index: 12;
-    pointer-events: auto;
+  .masthead .left  { justify-self: start; }
+  .masthead .mid   { justify-self: center; }
+  .masthead .right { justify-self: end; display: flex; gap: 22px; }
+  .masthead a { color: var(--ink); text-decoration: none; border-bottom: 1px solid transparent; }
+  .masthead a:hover { border-bottom-color: var(--ink); }
+  .pulse {
     display: inline-flex;
     align-items: center;
-    gap: 14px;
-    padding: 13px 24px;
+    gap: 8px;
+  }
+  .pulse-dot {
+    width: 8px;
+    height: 8px;
+    background: var(--accent);
+    /* No glow. No shadow. Just a square. */
+  }
+  .pulse-dot.off { background: var(--ink); }
+  .pulse-dot.blink { animation: hardblink 1.6s steps(2, end) infinite; }
+  @keyframes hardblink {
+    0%, 49.999% { opacity: 1; }
+    50%, 100%   { opacity: 0; }
+  }
+
+  /* ---------- Hero ---------- */
+  .hero {
+    padding: clamp(28px, 6vw, 64px) clamp(22px, 4vw, 48px);
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: clamp(24px, 4vw, 40px);
+    border-bottom: 1px solid var(--rule);
+  }
+
+  .word {
     font-family: var(--sans);
-    font-weight: 600;
-    font-size: clamp(13px, 1.1vw, 15px);
-    color: var(--w);
-    text-decoration: none;
-    border: 1px solid rgba(255,255,255,0.14);
-    border-radius: 999px;
-    background: rgba(8,8,10,0.45);
-    -webkit-backdrop-filter: blur(12px);
-    backdrop-filter: blur(12px);
-    box-shadow: 0 30px 60px -30px rgba(0,0,0,0.85);
-    transition: transform .5s cubic-bezier(.2,.8,.2,1), border-color .4s ease;
-  }
-  .cta:hover { transform: translateX(-50%) translateY(-1px); border-color: rgba(240,215,42,0.5); }
-  .cta .pin {
-    width: 7px; height: 7px;
-    border-radius: 50%;
-    background: var(--y);
-    box-shadow: 0 0 14px var(--y);
-  }
-
-  /* Step sequencer — 5 rows × 16 cells, one per MAYOR letter.
-     The instrument itself. Everyone in the room edits the same grid. */
-  .seq {
-    position: absolute;
-    left: 50%;
-    bottom: clamp(96px, 14vh, 150px);
-    transform: translateX(-50%);
-    z-index: 14;
-    pointer-events: auto;
-    display: grid;
-    grid-template-columns: 22px repeat(16, 1fr);
-    grid-auto-rows: clamp(16px, 2.4vw, 22px);
-    gap: clamp(2px, 0.4vw, 4px);
-    padding: 10px clamp(12px, 1.6vw, 18px);
-    border-radius: 12px;
-    background: rgba(8,8,10,0.55);
-    -webkit-backdrop-filter: blur(14px);
-    backdrop-filter: blur(14px);
-    border: 1px solid rgba(255,255,255,0.10);
-    box-shadow: 0 30px 60px -30px rgba(0,0,0,0.85);
-    width: min(86vw, 720px);
-  }
-  .seq .head {
-    grid-column: 2 / -1;
-    display: grid;
-    grid-template-columns: repeat(16, 1fr);
-    gap: clamp(2px, 0.4vw, 4px);
-    height: 4px;
-  }
-  .seq .head span {
-    height: 4px;
-    background: rgba(255,255,255,0.06);
-    border-radius: 2px;
-    transition: background .12s ease, box-shadow .12s ease;
-  }
-  .seq .head span.beat { background: rgba(255,255,255,0.18); }
-  .seq .head span.now { background: var(--y); box-shadow: 0 0 6px var(--y); }
-  .seq .label {
-    font-family: var(--display);
     font-weight: 900;
-    font-size: clamp(13px, 1.3vw, 16px);
-    color: var(--y);
-    text-align: center;
-    align-self: center;
-    line-height: 1;
+    font-size: clamp(72px, 19vw, 280px);
+    line-height: 0.82;
+    letter-spacing: -0.055em;
+    color: var(--ink);
+    user-select: none;
+    text-transform: lowercase;
   }
-  .seq .cell {
-    width: 100%;
-    height: 100%;
-    border-radius: 4px;
-    border: 1px solid rgba(255,255,255,0.10);
-    background: rgba(255,255,255,0.04);
-    cursor: pointer;
-    padding: 0;
-    transition: background .1s ease, transform .12s ease, box-shadow .15s ease;
-  }
-  .seq .cell:hover { background: rgba(255,255,255,0.10); }
-  .seq .cell.on {
-    background: var(--y);
-    border-color: var(--y);
-    box-shadow: 0 0 8px rgba(240,215,42,0.5);
-  }
-  .seq .cell.now {
-    transform: scale(1.15);
-    box-shadow: 0 0 12px rgba(255,255,255,0.45);
-  }
-  @media (max-width: 700px) {
-    .seq { width: 94vw; padding: 6px 8px; }
+  .word .dot {
+    display: inline-block;
+    width: 0.18em;
+    height: 0.18em;
+    background: var(--accent);
+    margin-left: 0.08em;
+    margin-bottom: 0.08em;
+    vertical-align: baseline;
   }
 
-  /* Chronicle — the real Mayor's recent activity, surfacing as a quiet
-     line at the top of the page. Implicit. Updates every minute. */
-  .chronicle {
-    position: fixed;
-    top: clamp(48px, 6vw, 64px);
-    left: 50%;
-    transform: translateX(-50%);
-    z-index: 14;
-    pointer-events: none;
-    font-family: var(--mono);
-    font-size: clamp(10px, 0.95vw, 11px);
-    color: rgba(255,255,255,0.45);
-    letter-spacing: 0.18em;
-    text-transform: uppercase;
-    text-align: center;
-    transition: opacity .8s ease;
-    opacity: 0;
-    max-width: 90vw;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
+  .charter {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: var(--gap);
   }
-  .chronicle.shown { opacity: 1; }
-  .chronicle .accent { color: rgba(255, 220, 80, 0.7); }
-
-  /* TUNNEL — full-screen 3D world overlay. Hidden by default. When active,
-     it covers the page; the room behind dims to ~5%. Built on three.js. */
-  .tunnel {
-    position: fixed;
-    inset: 0;
-    z-index: 30;
-    pointer-events: none;
-    opacity: 0;
-    transition: opacity 1.5s cubic-bezier(.2,.8,.2,1);
-    background: #000;
+  .charter > div {
+    border-top: 1px solid var(--rule);
+    padding-top: 14px;
+    font-size: 14px;
+    line-height: 1.5;
+    color: var(--ink-2);
   }
-  .tunnel.active { opacity: 1; pointer-events: auto; }
-  .tunnel canvas { display: block; width: 100%; height: 100%; }
-  .tunnel .scene-tag {
-    position: absolute;
-    top: clamp(20px, 4vw, 36px);
-    left: 50%;
-    transform: translateX(-50%);
-    color: rgba(255, 220, 80, 0.85);
-    font-family: var(--mono);
-    font-size: clamp(10px, 1vw, 12px);
-    letter-spacing: 0.32em;
-    text-transform: uppercase;
-    text-shadow: 0 0 16px rgba(255, 200, 60, 0.6);
-    pointer-events: none;
-  }
-  .tunnel .esc-hint {
-    position: absolute;
-    bottom: clamp(20px, 4vw, 36px);
-    left: 50%;
-    transform: translateX(-50%);
-    color: rgba(255, 255, 255, 0.5);
-    font-family: var(--mono);
-    font-size: 10px;
-    letter-spacing: 0.24em;
-    text-transform: uppercase;
-    pointer-events: none;
-  }
-  /* Dim the rest of the page when tunnel is active */
-  body.tunneling .stage { opacity: 0.05; transition: opacity 1s ease; }
-
-  /* Sound chip — one tiny invitation, bottom-right. */
-  .sound {
-    position: absolute;
-    bottom: clamp(38px, 6vh, 64px);
-    right: clamp(22px, 3vw, 32px);
-    z-index: 12;
-    pointer-events: auto;
-    padding: 8px 14px;
-    border-radius: 999px;
-    border: 1px solid rgba(255,255,255,0.10);
-    background: rgba(8,8,10,0.45);
-    -webkit-backdrop-filter: blur(12px);
-    backdrop-filter: blur(12px);
-    color: rgba(255,255,255,0.65);
+  .charter > div b {
+    display: block;
     font-family: var(--mono);
     font-size: 10.5px;
     letter-spacing: 0.18em;
     text-transform: uppercase;
-    cursor: pointer;
-    transition: color .3s ease, border-color .3s ease;
+    color: var(--ink);
+    font-weight: 600;
+    margin-bottom: 8px;
   }
-  .sound:hover { color: var(--w); border-color: rgba(255,255,255,0.32); }
-  .sound.on { color: var(--y); border-color: rgba(240,215,42,0.45); }
+  @media (max-width: 760px) {
+    .charter { grid-template-columns: 1fr; }
+  }
 
-  @media (prefers-reduced-motion: reduce) {
-    * { animation: none !important; transition: none !important; }
-    body { cursor: auto; }
-    .cursor-halo, .cursor-dot { display: none; }
+  /* ---------- Operating panel ---------- */
+  .panel {
+    display: grid;
+    grid-template-columns: 1.2fr 1fr;
+    border-bottom: 1px solid var(--rule);
   }
-  @media (max-width: 700px) {
-    body { cursor: auto; }
-    .cursor-halo, .cursor-dot { display: none; }
-    .corner.bl, .corner.br { display: none; }
+  .panel > section {
+    padding: clamp(20px, 3vw, 32px);
+  }
+  .panel .left  { border-right: 1px solid var(--rule); }
+  @media (max-width: 760px) {
+    .panel { grid-template-columns: 1fr; }
+    .panel .left { border-right: 0; border-bottom: 1px solid var(--rule); }
+  }
+
+  .h-rule {
+    font-family: var(--mono);
+    font-size: 10.5px;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    color: var(--ink);
+    border-bottom: 1px solid var(--rule);
+    padding-bottom: 10px;
+    margin-bottom: 14px;
+    display: flex;
+    justify-content: space-between;
+  }
+  .h-rule .meta {
+    color: var(--ink-2);
+    font-weight: 400;
+    letter-spacing: 0.18em;
+  }
+
+  /* Hardware-row: TE-style flat indicator strip, NOT glowing */
+  .strip {
+    display: grid;
+    grid-template-columns: repeat(24, 1fr);
+    gap: 4px;
+    margin-bottom: 18px;
+  }
+  .strip .cell {
+    height: 22px;
+    border: 1px solid var(--rule);
+    background: var(--paper);
+  }
+  .strip .cell.on   { background: var(--ink); }
+  .strip .cell.hot  { background: var(--accent); border-color: var(--accent); }
+
+  /* Vital readouts as flat key/value rows */
+  .readout {
+    font-family: var(--mono);
+    font-size: 13px;
+  }
+  .readout .row {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    align-items: baseline;
+    padding: 6px 0;
+    border-bottom: 1px dashed rgba(10,10,10,0.3);
+  }
+  .readout .row:last-child { border-bottom: 0; }
+  .readout .k {
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--ink-2);
+  }
+  .readout .v {
+    font-variant-numeric: tabular-nums;
+    font-weight: 600;
+    color: var(--ink);
+  }
+  .readout .v.hot { color: var(--accent); }
+
+  /* Chronicle list — recent municipal activity, no animation, no glow */
+  .chron {
+    list-style: none;
+    font-family: var(--mono);
+    font-size: 12px;
+    line-height: 1.55;
+  }
+  .chron li {
+    display: grid;
+    grid-template-columns: 64px 1fr;
+    gap: 14px;
+    padding: 8px 0;
+    border-bottom: 1px dashed rgba(10,10,10,0.3);
+  }
+  .chron li:last-child { border-bottom: 0; }
+  .chron .ts {
+    color: var(--ink-2);
+    letter-spacing: 0.06em;
+    font-variant-numeric: tabular-nums;
+  }
+  .chron .ev { color: var(--ink); }
+  .chron .ev .tag {
+    display: inline-block;
+    padding: 1px 6px;
+    margin-right: 6px;
+    background: var(--ink);
+    color: var(--paper);
+    font-size: 10.5px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+  }
+  .chron .ev .tag.acc { background: var(--accent); color: var(--paper); }
+
+  /* ---------- Contact bar ---------- */
+  .contact {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    align-items: stretch;
+    border-bottom: 1px solid var(--rule);
+  }
+  .contact .blurb {
+    padding: clamp(20px, 3vw, 32px);
+    font-size: 15px;
+    line-height: 1.5;
+    color: var(--ink-2);
+    border-right: 1px solid var(--rule);
+  }
+  .contact .blurb b { color: var(--ink); }
+  .contact a.send {
+    align-self: stretch;
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 0 clamp(22px, 3vw, 36px);
+    background: var(--ink);
+    color: var(--paper);
+    text-decoration: none;
+    font-family: var(--mono);
+    font-size: 14px;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    transition: background 80ms steps(1, end);
+  }
+  .contact a.send:hover { background: var(--accent); }
+  .contact a.send .arrow {
+    display: inline-block;
+    width: 18px;
+    height: 1px;
+    background: currentColor;
+    position: relative;
+  }
+  .contact a.send .arrow::after {
+    content: "";
+    position: absolute;
+    right: 0;
+    top: -3px;
+    width: 6px;
+    height: 6px;
+    border-right: 1px solid currentColor;
+    border-top: 1px solid currentColor;
+    transform: rotate(45deg);
+  }
+  @media (max-width: 760px) {
+    .contact { grid-template-columns: 1fr; }
+    .contact .blurb { border-right: 0; border-bottom: 1px solid var(--rule); }
+    .contact a.send { padding: 18px 22px; }
+  }
+
+  /* ---------- Footer ledger ---------- */
+  .foot {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    padding: 12px 22px;
+    font-family: var(--mono);
+    font-size: 10.5px;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--ink-2);
+  }
+  .foot .right { justify-self: end; }
+  .foot a { color: var(--ink-2); text-decoration: none; }
+  .foot a:hover { color: var(--ink); border-bottom: 1px solid var(--ink); }
+
+  /* ---------- Selection ---------- */
+  ::selection { background: var(--accent); color: var(--paper); }
+
+  /* ---------- Reduced motion ---------- */
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation: none !important; transition: none !important; }
   }
 </style>
 </head>
 <body>
 
-<div class="stage">
+<main class="ledger" id="ledger">
 
-  <!-- Atmosphere -->
-  <div class="field" aria-hidden="true"><canvas data-field></canvas></div>
-  <div class="wash" aria-hidden="true"></div>
-
-  <!-- Aurora curtains -->
-  <div class="aurora" aria-hidden="true"><canvas data-aurora></canvas></div>
-
-  <!-- Presence stars -->
-  <div class="stars" aria-hidden="true"><canvas data-stars></canvas></div>
-
-  <!-- Cursor trail -->
-  <div class="trail" aria-hidden="true"><canvas data-trail></canvas></div>
-
-  <!-- Note ripples -->
-  <div class="ripples" aria-hidden="true"><canvas data-ripples></canvas></div>
-
-  <!-- Hero -->
-  <div class="hero" aria-label="Mayor">
-    <div class="layer back" data-layer="back">
-      <svg viewBox="0 0 1500 480" preserveAspectRatio="xMidYMid meet">
-        <text x="750" y="380" font-size="440" letter-spacing="-18">MAYOR</text>
-      </svg>
+  <!-- ============== MASTHEAD ============== -->
+  <header class="masthead">
+    <div class="left pulse" id="pulse" aria-live="polite">
+      <span class="pulse-dot off" id="pulse-dot"></span>
+      <span id="pulse-label">connecting · town</span>
     </div>
-    <div class="layer mid" data-layer="mid">
-      <svg viewBox="0 0 1500 480" preserveAspectRatio="xMidYMid meet">
-        <g id="mayor-letters" font-family="Display, Arial Narrow Bold, sans-serif"
-                              font-weight="900" font-size="440" text-anchor="middle">
-          <text class="ml" data-letter="M" x="180"  y="380">M</text>
-          <text class="ml" data-letter="A" x="465"  y="380">A</text>
-          <text class="ml" data-letter="Y" x="750"  y="380">Y</text>
-          <text class="ml" data-letter="O" x="1035" y="380">O</text>
-          <text class="ml" data-letter="R" x="1320" y="380">R</text>
-        </g>
-      </svg>
+    <div class="mid">Office of the Mayor</div>
+    <nav class="right">
+      <a href="mailto:um@mayor.wtf">um@mayor.wtf</a>
+      <a href="https://n3wth.com" rel="me">n3wth.com</a>
+    </nav>
+  </header>
+
+  <!-- ============== HERO ============== -->
+  <section class="hero">
+    <div class="word" aria-label="mayor">mayor<span class="dot" aria-hidden="true"></span></div>
+
+    <div class="charter">
+      <div>
+        <b>01 — Charter</b>
+        A small municipal authority for a town that mostly runs itself. Coordinates work, files paper, signs off on merges, answers the door.
+      </div>
+      <div>
+        <b>02 — Constitution</b>
+        Evidence over assumptions. Code over docs. One thing at a time. The town log is the source of truth.
+      </div>
+      <div>
+        <b>03 — Office hours</b>
+        Always open. Emails answered in the order they arrive. Urgent matters routed to the witness on duty.
+      </div>
     </div>
-  </div>
+  </section>
 
-  <!-- Corners -->
-  <div class="corner tl"><span class="live"></span><span data-presence>connecting</span></div>
-  <div class="corner tr"><a href="https://n3wth.com">n3wth.com</a></div>
+  <!-- ============== OPERATING PANEL ============== -->
+  <section class="panel">
 
-  <!-- Step sequencer — built by motion.js once the page is alive -->
-  <div class="seq" data-seq aria-label="Mayor sequencer"></div>
+    <section class="left">
+      <div class="h-rule">
+        <span>Town pulse</span>
+        <span class="meta" id="pulse-meta">last 60 minutes</span>
+      </div>
 
-  <!-- CTA -->
-  <a class="cta" href="mailto:um@mayor.wtf">
-    <span class="pin"></span>
-    <span>um@mayor.wtf</span>
-  </a>
+      <!-- Activity strip: 24 cells, one per recent slot. Flat blocks. -->
+      <div class="strip" id="strip" aria-hidden="true"></div>
 
-  <!-- Sound -->
-  <button class="sound" data-sound>🔇 sound</button>
+      <div class="readout" id="readout">
+        <div class="row"><span class="k">Citizens</span><span class="v" id="r-citizens">—</span></div>
+        <div class="row"><span class="k">Sessions today</span><span class="v" id="r-sessions">—</span></div>
+        <div class="row"><span class="k">Sessions this hour</span><span class="v" id="r-hour">—</span></div>
+        <div class="row"><span class="k">Active right now</span><span class="v" id="r-active">—</span></div>
+        <div class="row"><span class="k">Last mail received</span><span class="v" id="r-mail">—</span></div>
+      </div>
+    </section>
 
-  <!-- Cursor -->
-  <div class="cursor-halo" data-cursor-halo aria-hidden="true"></div>
-  <div class="cursor-dot" data-cursor-dot aria-hidden="true"></div>
+    <section class="right">
+      <div class="h-rule">
+        <span>Recent business</span>
+        <span class="meta" id="chron-meta">municipal log</span>
+      </div>
+      <ul class="chron" id="chron">
+        <li><span class="ts">— · — —</span><span class="ev"><span class="tag">boot</span>Loading the ledger.</span></li>
+      </ul>
+    </section>
 
-</div>
+  </section>
 
-<!-- Chronicle of the mayor's actual recent work -->
-<div class="chronicle" data-chronicle aria-hidden="true"></div>
+  <!-- ============== CONTACT ============== -->
+  <section class="contact">
+    <div class="blurb">
+      For polite inquiries, rude inquiries, scope questions, or job offers for the Mayor, write to <b>um@mayor.wtf</b>. The Mayor reads everything. Reply times vary by mood and queue depth.
+    </div>
+    <a class="send" href="mailto:um@mayor.wtf">
+      <span>Write the Mayor</span>
+      <span class="arrow" aria-hidden="true"></span>
+    </a>
+  </section>
 
-<!-- 3D tunnel overlay. Sits outside .stage so the dim doesn't cascade. -->
-<div class="tunnel" data-tunnel aria-hidden="true">
-  <canvas data-tunnel-canvas></canvas>
-  <div class="scene-tag" data-tunnel-tag></div>
-  <div class="esc-hint">esc to return</div>
-</div>
+  <!-- ============== FOOT ============== -->
+  <footer class="foot">
+    <div class="left">mayor.wtf · est. 2026 · hand-built</div>
+    <div class="right"><a href="https://github.com/n3wth/mayor">source</a></div>
+  </footer>
 
-<script src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/gsap.min.js" defer></script>
-<script src="https://cdn.jsdelivr.net/npm/tone@15.0.4/build/Tone.js" defer></script>
-<script type="importmap">
-{
-  "imports": {
-    "three": "https://cdn.jsdelivr.net/npm/three@0.165.0/build/three.module.min.js",
-    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.165.0/examples/jsm/",
-    "postprocessing": "https://cdn.jsdelivr.net/npm/postprocessing@6.36.4/build/postprocessing.esm.js"
+</main>
+
+<script>
+  // -----------------------------------------------------------------------
+  // Live town signal — reads /api/stats every 8s. No animation, just numbers.
+  // -----------------------------------------------------------------------
+
+  const $  = (sel) => document.querySelector(sel);
+  const els = {
+    pulseDot:    $("#pulse-dot"),
+    pulseLabel:  $("#pulse-label"),
+    pulseMeta:   $("#pulse-meta"),
+    strip:       $("#strip"),
+    citizens:    $("#r-citizens"),
+    sessions:    $("#r-sessions"),
+    hour:        $("#r-hour"),
+    active:      $("#r-active"),
+    mail:        $("#r-mail"),
+    chron:       $("#chron"),
+  };
+
+  // Build the 24-cell activity strip once.
+  const STRIP_CELLS = 24;
+  const cells = [];
+  for (let i = 0; i < STRIP_CELLS; i++) {
+    const el = document.createElement("div");
+    el.className = "cell";
+    els.strip.appendChild(el);
+    cells.push(el);
   }
-}
-</script>
-<script type="module">
-  import { initMotion } from "/motion.js";
-  const ready = () => (window.gsap ? initMotion(window.gsap) : requestAnimationFrame(ready));
-  ready();
+
+  function fmtAge(seconds) {
+    if (seconds == null || !Number.isFinite(seconds)) return "—";
+    if (seconds < 60)         return `${Math.round(seconds)}s ago`;
+    if (seconds < 60 * 60)    return `${Math.round(seconds / 60)}m ago`;
+    if (seconds < 60 * 60 * 24) return `${Math.round(seconds / 3600)}h ago`;
+    return `${Math.round(seconds / 86400)}d ago`;
+  }
+
+  // Map recent_pulse (0..N) onto the 24-cell strip. Newest on the right.
+  function paintStrip(pulse, hot) {
+    const n = Math.max(0, Math.min(STRIP_CELLS, Math.round(pulse || 0)));
+    for (let i = 0; i < STRIP_CELLS; i++) {
+      cells[i].classList.remove("on", "hot");
+      if (i >= STRIP_CELLS - n) {
+        cells[i].classList.add(i === STRIP_CELLS - 1 && hot ? "hot" : "on");
+      }
+    }
+  }
+
+  function paintChron(items) {
+    if (!items || !items.length) return;
+    els.chron.innerHTML = items.map(it => {
+      const klass = it.kind === "merge" || it.kind === "ship" ? "tag acc" : "tag";
+      const tag   = (it.kind || "log").slice(0, 6);
+      const ts    = it.ts || "—";
+      const ev    = it.ev || "";
+      return `<li><span class="ts">${ts}</span><span class="ev"><span class="${klass}">${tag}</span>${ev}</span></li>`;
+    }).join("");
+  }
+
+  // Synthesize a chronicle from the stats payload. The /api/stats endpoint
+  // doesn't return per-event details (by design — no PII), so we render
+  // the aggregates as municipal-log entries.
+  function chronFromStats(s) {
+    const out = [];
+    const now = new Date();
+    const hh  = String(now.getHours()).padStart(2, "0");
+    const mm  = String(now.getMinutes()).padStart(2, "0");
+    const stamp = `${hh}:${mm}`;
+
+    if (s.online === false || s.stale) {
+      out.push({ ts: stamp, kind: "halt",  ev: "Town hall offline. Records cached." });
+    }
+    if (s.sessions_this_hour > 0) {
+      out.push({ ts: stamp, kind: "work",  ev: `${s.sessions_this_hour} session${s.sessions_this_hour === 1 ? "" : "s"} opened this hour.` });
+    }
+    if (s.active_sessions > 0) {
+      out.push({ ts: stamp, kind: "live",  ev: `${s.active_sessions} polecat${s.active_sessions === 1 ? "" : "s"} on the floor right now.` });
+    }
+    if (s.last_email_age_seconds != null) {
+      out.push({ ts: stamp, kind: "mail",  ev: `Last citizen mail received ${fmtAge(s.last_email_age_seconds)}.` });
+    }
+    if (s.sessions_today > 0) {
+      out.push({ ts: stamp, kind: "log",   ev: `${s.sessions_today} session${s.sessions_today === 1 ? "" : "s"} on the books today.` });
+    }
+    if (s.citizens > 0) {
+      out.push({ ts: stamp, kind: "ship",  ev: `${s.citizens} citizen${s.citizens === 1 ? "" : "s"} on the rolls.` });
+    }
+    if (out.length === 0) {
+      out.push({ ts: stamp, kind: "quiet", ev: "Quiet morning. Mayor at the desk." });
+    }
+    return out;
+  }
+
+  let lastOnline = null;
+
+  async function tick() {
+    try {
+      const r = await fetch("/api/stats", { cache: "no-store" });
+      if (!r.ok) throw new Error(`stats ${r.status}`);
+      const s = await r.json();
+
+      const online = s.online !== false && !s.stale;
+      els.pulseDot.classList.toggle("off",   !online);
+      els.pulseDot.classList.toggle("blink",  online && (s.active_sessions || 0) > 0);
+      els.pulseLabel.textContent = online
+        ? (s.active_sessions > 0 ? `live · ${s.active_sessions} on the floor` : "open · town quiet")
+        : "offline · serving cache";
+
+      els.citizens.textContent = (s.citizens ?? "—").toString();
+      els.sessions.textContent = (s.sessions_today ?? "—").toString();
+      els.hour.textContent     = (s.sessions_this_hour ?? "—").toString();
+      els.active.textContent   = (s.active_sessions ?? "—").toString();
+      if (s.active_sessions > 0) els.active.classList.add("hot"); else els.active.classList.remove("hot");
+      els.mail.textContent     = fmtAge(s.last_email_age_seconds);
+
+      paintStrip(s.recent_pulse ?? 0, (s.active_sessions || 0) > 0);
+      paintChron(chronFromStats(s));
+
+      lastOnline = online;
+    } catch (e) {
+      els.pulseDot.classList.add("off");
+      els.pulseDot.classList.remove("blink");
+      els.pulseLabel.textContent = "offline · serving cache";
+    }
+  }
+
+  tick();
+  setInterval(tick, 8000);
 </script>
 
 </body>
